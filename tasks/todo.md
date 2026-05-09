@@ -3,7 +3,7 @@
 **Name**: Blueport (lineage: Project Blue Book, USAF UAP project 1952-1969)
 **Working dir**: `~/Documents/Code/blueport/`
 **Repo**: public from day one, AGPL 3.0
-**Status**: Phase 1 — yalla v0.1 ship in progress
+**Status**: v0.1.0 SHIPPED ✅ (2026-05-09) — github.com/sboghossian/blueport/releases/tag/v0.1.0
 
 ## yalla v0.1 acceptance criteria
 

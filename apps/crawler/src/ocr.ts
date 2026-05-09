@@ -79,7 +79,7 @@ async function claudePdfOcr(env: Env, pdf: ArrayBuffer): Promise<OcrPage[]> {
   return parsePageTags(text);
 }
 
-function parsePageTags(text: string): OcrPage[] {
+export function parsePageTags(text: string): OcrPage[] {
   const pages: OcrPage[] = [];
   const pattern = /<page n="(\d+)">([\s\S]*?)<\/page>/g;
   let match: RegExpExecArray | null;
@@ -96,7 +96,7 @@ function parsePageTags(text: string): OcrPage[] {
   return pages;
 }
 
-function detectRedactions(text: string): boolean {
+export function detectRedactions(text: string): boolean {
   return /\[REDACTED\]|████|■■■/.test(text);
 }
 

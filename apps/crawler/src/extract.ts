@@ -22,6 +22,13 @@ export interface Extraction {
 
 const MAX_INPUT_CHARS = 50_000;
 
+export function stripJsonFence(text: string): string {
+  const trimmed = text.trim();
+  const fenced = /^```(?:json)?\s*\n?([\s\S]*?)\n?```$/.exec(trimmed);
+  if (fenced && fenced[1]) return fenced[1].trim();
+  return trimmed;
+}
+
 export async function extract(env: Env, fullText: string): Promise<Extraction> {
   const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
   const truncated = fullText.slice(0, MAX_INPUT_CHARS);
@@ -44,7 +51,7 @@ export async function extract(env: Env, fullText: string): Promise<Extraction> {
   );
   if (!textBlock) throw new Error("extract: empty response from Claude");
 
-  const json = JSON.parse(textBlock.text) as {
+  const json = JSON.parse(stripJsonFence(textBlock.text)) as {
     title: string | null;
     docType: DocType;
     documentDate: string | null;

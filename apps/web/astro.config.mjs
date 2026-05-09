@@ -8,5 +8,5 @@ export default defineConfig({
     platformProxy: { enabled: true },
   }),
   integrations: [tailwind()],
-  site: "https://bluebook.live",
+  site: "https://blueport.dashable.dev",
 });

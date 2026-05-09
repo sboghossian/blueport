@@ -1,5 +1,5 @@
 {
-  "name": "bluebook",
+  "name": "blueport",
   "version": "0.0.1",
   "private": true,
   "description": "Source-grounded archive of UAP/UFO documents released by governments",
@@ -9,12 +9,12 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "pnpm --filter @bluebook/web dev",
-    "build": "pnpm --filter @bluebook/web build",
-    "crawler:dev": "pnpm --filter @bluebook/crawler dev",
-    "crawler:deploy": "pnpm --filter @bluebook/crawler deploy",
-    "db:generate": "pnpm --filter @bluebook/db generate",
-    "db:migrate": "pnpm --filter @bluebook/db migrate",
+    "dev": "pnpm --filter @blueport/web dev",
+    "build": "pnpm --filter @blueport/web build",
+    "crawler:dev": "pnpm --filter @blueport/crawler dev",
+    "crawler:deploy": "pnpm --filter @blueport/crawler deploy",
+    "db:generate": "pnpm --filter @blueport/db generate",
+    "db:migrate": "pnpm --filter @blueport/db migrate",
     "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {

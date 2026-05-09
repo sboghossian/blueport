@@ -13,7 +13,7 @@ export interface Env {
 
 const app = new Hono<{ Bindings: Env }>();
 
-app.get("/", (c) => c.text("bluebook crawler — alive"));
+app.get("/", (c) => c.text("blueport crawler — alive"));
 
 app.get("/healthz", (c) => c.json({ ok: true, ts: Date.now() }));
 

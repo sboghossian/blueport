@@ -1,6 +1,6 @@
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
-import { documents, crawlRuns } from "@bluebook/db/schema";
+import { documents, crawlRuns } from "@blueport/db/schema";
 import type { Env } from "./index.js";
 
 export interface CrawlResult {

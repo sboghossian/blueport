@@ -1,5 +1,5 @@
 {
-  "name": "@bluebook/crawler",
+  "name": "@blueport/crawler",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -12,7 +12,7 @@
   "dependencies": {
     "hono": "^4.6.13",
     "@anthropic-ai/sdk": "^0.32.1",
-    "@bluebook/db": "workspace:*"
+    "@blueport/db": "workspace:*"
   },
   "devDependencies": {
     "wrangler": "^3.91.0",

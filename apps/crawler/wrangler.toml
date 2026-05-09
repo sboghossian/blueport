@@ -1,4 +1,4 @@
-name = "bluebook-crawler"
+name = "blueport-crawler"
 main = "src/index.ts"
 compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat"]
@@ -8,20 +8,20 @@ crons = ["0 */6 * * *"] # every 6 hours
 
 [[d1_databases]]
 binding = "DB"
-database_name = "bluebook"
+database_name = "blueport"
 database_id = "REPLACE_ME"
 
 [[r2_buckets]]
 binding = "DOCS"
-bucket_name = "bluebook-docs"
+bucket_name = "blueport-docs"
 
 [[vectorize]]
 binding = "VECTORS"
-index_name = "bluebook-pages"
+index_name = "blueport-pages"
 
 [ai]
 binding = "AI"
 
 [vars]
-USER_AGENT = "BluebookBot/0.1 (+https://github.com/sboghossian/bluebook)"
+USER_AGENT = "BlueportBot/0.1 (+https://github.com/sboghossian/blueport)"
 SOURCE_INDEX_URL = "https://www.war.gov/UFO/"

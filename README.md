@@ -1,4 +1,4 @@
-# Bluebook
+# Blueport
 
 The source-grounded archive of UAP/UFO documents released by governments.
 
@@ -50,4 +50,4 @@ pnpm crawler:dev  # crawler local cron via wrangler
 
 ## Why this exists
 
-The Pentagon began publishing UFO files. Whoever owns the searchable, source-grounded index of those documents owns every journalist, researcher, and curious citizen who ever wants to verify a claim. Bluebook is that index.
+The Pentagon began publishing UFO files. Whoever owns the searchable, source-grounded index of those documents owns every journalist, researcher, and curious citizen who ever wants to verify a claim. Blueport is that index.

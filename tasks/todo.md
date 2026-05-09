@@ -1,7 +1,7 @@
-# Bluebook — Plan
+# Blueport — Plan
 
-**Name**: Bluebook (lineage: Project Blue Book, USAF UAP project 1952-1969)
-**Working dir**: `~/Documents/Code/bluebook/`
+**Name**: Blueport (lineage: Project Blue Book, USAF UAP project 1952-1969)
+**Working dir**: `~/Documents/Code/blueport/`
 **Repo**: public from day one, AGPL 3.0
 **Status**: Phase 0 — pending domain + OCR confirmation
 **Started**: 2026-05-09
@@ -18,7 +18,7 @@ The canonical, source-grounded archive of UAP/UFO documents released by governme
 
 | # | Decision | Confirmed |
 |---|---|---|
-| 1 | Name | **Bluebook** ✅ |
+| 1 | Name | **Blueport** ✅ |
 | 2 | Hosting | **Cloudflare** (Pages + Workers + D1 + Vectorize + R2) ✅ |
 | 3 | Repo visibility | **Public** day one ✅ |
 | 4 | License | **AGPL 3.0** ✅ |
@@ -27,7 +27,7 @@ The canonical, source-grounded archive of UAP/UFO documents released by governme
 | 7 | LLM | Claude API — Haiku (entity extraction), Sonnet (summaries), Opus (contradiction view + skeptic/analyst) ✅ |
 | 8 | Vector DB | **Cloudflare Vectorize** ✅ |
 | 9 | Auth (v0.1) | **None** — fully public read; Clerk in v0.2 ✅ |
-| 10 | Domain | **bluebook.live** (preferred — checking availability) 🟡 |
+| 10 | Domain | **blueport.dashable.dev** (subdomain on existing dashable.dev infra; pivoted from "bluebook" — every common bluebook.* TLD was squatted) ✅ |
 
 ---
 
@@ -57,14 +57,14 @@ Estimated v0.1 cost: <$50/mo on light usage.
 **Slice**: ingest + OCR + search + diff RSS + provenance badge.
 
 ### 1.1 Ingestion (§A)
-- [ ] Crawler: hit `war.gov/UFO/` index, follow every PDF/doc link (depth 2)
+- [x] Crawler: hit `war.gov/UFO/` index, follow every PDF/doc link
 - [ ] Multi-source connectors stub: war.gov only for v0.1, AARO + Black Vault wired but disabled
-- [ ] File fingerprinting: SHA256 per doc, store in `documents` table
-- [ ] Provenance ledger: URL + fetch date + hash + page count + http_status
-- [ ] R2 upload: store original PDF at `r2://uap/<sha256>.pdf`
-- [ ] Hash-anchored snapshots: never overwrite, version on hash change
-- [ ] OCR pipeline: Mistral OCR per page → store text in D1
-- [ ] Cron: every 6 hours, run crawler + diff vs last snapshot
+- [x] File fingerprinting: SHA256 per doc, store in `documents` table
+- [x] Provenance ledger: URL + fetch date + hash + http_status (page count post-OCR)
+- [x] R2 upload: store original PDF at `r2://docs/<sha256>.pdf`
+- [x] Hash-anchored snapshots: never overwrite, version on hash change
+- [ ] OCR pipeline: Workers AI (Llama 3.2 Vision) per page → store text in D1
+- [x] Cron: every 6 hours via Cloudflare Cron Triggers
 
 ### 1.2 Document understanding (§B, minimal)
 - [ ] Auto-classification: 4 buckets only (incident_report / memo / hearing / other)

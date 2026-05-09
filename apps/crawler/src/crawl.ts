@@ -1,6 +1,8 @@
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
-import { documents, crawlRuns } from "@blueport/db/schema";
+import { documents, pages, entities, crawlRuns } from "@blueport/db/schema";
+import { ocrPdf } from "./ocr.js";
+import { extract } from "./extract.js";
 import type { Env } from "./index.js";
 
 export interface CrawlResult {
@@ -85,7 +87,7 @@ async function ingestDocument(
   const sha = await sha256(buf);
 
   const existing = await db
-    .select()
+    .select({ sha256: documents.sha256 })
     .from(documents)
     .where(eq(documents.sha256, sha))
     .limit(1);
@@ -98,14 +100,49 @@ async function ingestDocument(
     customMetadata: { sourceUrl: url, fetchedAt: new Date().toISOString() },
   });
 
+  const pageData = await ocrPdf(env, buf);
+  const fullText = pageData.map((p) => p.text).join("\n\n");
+  const extraction = await extract(env, fullText);
+
   await db.insert(documents).values({
     sha256: sha,
     sourceUrl: url,
     sourceDomain: new URL(url).hostname,
+    title: extraction.title,
+    docType: extraction.docType,
+    pageCount: pageData.length,
     fetchedAt: new Date(),
+    documentDate: extraction.documentDate,
+    incidentDate: extraction.incidentDate,
     httpStatus: res.status,
     r2Key,
+    summary: extraction.summary,
   });
+
+  if (pageData.length > 0) {
+    await db.insert(pages).values(
+      pageData.map((p) => ({
+        docSha: sha,
+        pageNumber: p.pageNumber,
+        text: p.text,
+        ocrModel: p.ocrModel,
+        ocrConfidence: p.ocrConfidence,
+        hasRedactions: p.hasRedactions,
+      })),
+    );
+  }
+
+  if (extraction.entities.length > 0) {
+    await db.insert(entities).values(
+      extraction.entities.map((e) => ({
+        docSha: sha,
+        pageNumber: null,
+        kind: e.kind,
+        value: e.value,
+        normalized: e.normalized,
+      })),
+    );
+  }
 
   return "new";
 }

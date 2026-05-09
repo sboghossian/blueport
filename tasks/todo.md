@@ -60,17 +60,17 @@ Estimated v0.1 cost: <$50/mo on light usage.
 - [x] Crawler: hit `war.gov/UFO/` index, follow every PDF/doc link
 - [ ] Multi-source connectors stub: war.gov only for v0.1, AARO + Black Vault wired but disabled
 - [x] File fingerprinting: SHA256 per doc, store in `documents` table
-- [x] Provenance ledger: URL + fetch date + hash + http_status (page count post-OCR)
+- [x] Provenance ledger: URL + fetch date + hash + http_status + page count
 - [x] R2 upload: store original PDF at `r2://docs/<sha256>.pdf`
 - [x] Hash-anchored snapshots: never overwrite, version on hash change
-- [ ] OCR pipeline: Workers AI (Llama 3.2 Vision) per page → store text in D1
+- [x] OCR pipeline: hybrid — `unpdf` text-layer first (free), Claude Haiku PDF vision fallback (~$0.001/page) for scans. Workers AI Llama Vision deferred (no PDF rasterization in Workers).
 - [x] Cron: every 6 hours via Cloudflare Cron Triggers
 
 ### 1.2 Document understanding (§B, minimal)
-- [ ] Auto-classification: 4 buckets only (incident_report / memo / hearing / other)
-- [ ] Entity extraction (Haiku): people, locations, dates, craft mentions
-- [ ] Date extraction: incident_date vs document_date
-- [ ] Skip handwriting + redaction classification for v0.1 (move to Phase 4)
+- [x] Auto-classification: 4 buckets (incident_report / memo / hearing / other)
+- [x] Entity extraction (Haiku): people, locations, units, craft, sensors, dates
+- [x] Date extraction: incident_date vs document_date
+- [x] Basic redaction flag: `pages.has_redactions` set when `[REDACTED]` / black bars detected (full classification deferred to Phase 4)
 
 ### 1.3 Search (§C)
 - [ ] Hybrid search: D1 FTS5 (BM25) + Vectorize (cosine)

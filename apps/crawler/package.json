@@ -12,7 +12,9 @@
   "dependencies": {
     "hono": "^4.6.13",
     "@anthropic-ai/sdk": "^0.32.1",
-    "@blueport/db": "workspace:*"
+    "@blueport/db": "workspace:*",
+    "unpdf": "^0.12.1",
+    "drizzle-orm": "^0.36.4"
   },
   "devDependencies": {
     "wrangler": "^3.91.0",

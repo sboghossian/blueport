@@ -1,0 +1,27 @@
+name = "bluebook-crawler"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[triggers]
+crons = ["0 */6 * * *"] # every 6 hours
+
+[[d1_databases]]
+binding = "DB"
+database_name = "bluebook"
+database_id = "REPLACE_ME"
+
+[[r2_buckets]]
+binding = "DOCS"
+bucket_name = "bluebook-docs"
+
+[[vectorize]]
+binding = "VECTORS"
+index_name = "bluebook-pages"
+
+[ai]
+binding = "AI"
+
+[vars]
+USER_AGENT = "BluebookBot/0.1 (+https://github.com/sboghossian/bluebook)"
+SOURCE_INDEX_URL = "https://www.war.gov/UFO/"

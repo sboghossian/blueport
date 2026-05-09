@@ -1,0 +1,13 @@
+node_modules
+.DS_Store
+dist
+.astro
+.cache
+.wrangler
+.dev.vars
+.env
+.env.*
+!.env.example
+*.log
+coverage
+.turbo

@@ -1,0 +1,24 @@
+name = "blueport"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+pages_build_output_dir = "dist"
+
+[observability]
+enabled = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "blueport"
+database_id = "REPLACE_ME"
+
+[[r2_buckets]]
+binding = "DOCS"
+bucket_name = "blueport-docs"
+
+# Vectorize index "blueport-pages" — dimensions=768, metric=cosine.
+[[vectorize]]
+binding = "VECTORS"
+index_name = "blueport-pages"
+
+[ai]
+binding = "AI"

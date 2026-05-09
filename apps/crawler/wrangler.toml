@@ -3,6 +3,9 @@ main = "src/index.ts"
 compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat"]
 
+[observability]
+enabled = true
+
 [triggers]
 crons = ["0 */6 * * *"] # every 6 hours
 
@@ -15,6 +18,8 @@ database_id = "REPLACE_ME"
 binding = "DOCS"
 bucket_name = "blueport-docs"
 
+# Vectorize index "blueport-pages" — provisioned via scripts/setup.sh with
+# dimensions=768, metric=cosine (Voyage-3 embedding family).
 [[vectorize]]
 binding = "VECTORS"
 index_name = "blueport-pages"
@@ -25,3 +30,5 @@ binding = "AI"
 [vars]
 USER_AGENT = "BlueportBot/0.1 (+https://github.com/sboghossian/blueport)"
 SOURCE_INDEX_URL = "https://www.war.gov/UFO/"
+ALLOWED_SOURCE_HOSTS = "war.gov"
+# CRAWL_ADMIN_TOKEN is set via `wrangler secret put CRAWL_ADMIN_TOKEN`

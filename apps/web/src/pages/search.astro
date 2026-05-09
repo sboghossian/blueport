@@ -1,0 +1,120 @@
+---
+import { getDb } from "../lib/db";
+import { searchDocuments, highlight, DOC_TYPES } from "../lib/search";
+import DocCard from "../components/DocCard.astro";
+
+const url = new URL(Astro.request.url);
+const q = url.searchParams.get("q")?.trim() ?? "";
+const docType = url.searchParams.get("docType") ?? "any";
+const from = url.searchParams.get("from") ?? "";
+const to = url.searchParams.get("to") ?? "";
+
+const fromDate = from ? new Date(from) : undefined;
+const toDate = to ? new Date(`${to}T23:59:59Z`) : undefined;
+
+const env = Astro.locals.runtime.env;
+const db = getDb(env);
+
+const results = q
+  ? await searchDocuments(db, {
+      q,
+      docType,
+      fromDate,
+      toDate,
+      limit: 50,
+    })
+  : [];
+
+const title = q ? `search · ${q}` : "search · Blueport";
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <title>{title}</title>
+  </head>
+  <body class="bg-zinc-950 text-zinc-100 font-mono">
+    <main class="max-w-3xl mx-auto px-6 py-12">
+      <header class="mb-8">
+        <a href="/" class="text-xs text-zinc-500 hover:text-zinc-200">← Blueport</a>
+        <h1 class="mt-2 text-2xl font-bold tracking-tight">Search the archive</h1>
+      </header>
+
+      <form method="get" action="/search" class="space-y-3 rounded border border-zinc-800 bg-zinc-900/40 p-4">
+        <div>
+          <label for="q" class="block text-xs uppercase tracking-wide text-zinc-500">Query</label>
+          <input
+            id="q"
+            name="q"
+            type="text"
+            value={q}
+            placeholder="e.g. nimitz, project blue book, tic tac"
+            class="mt-1 w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-500 focus:outline-none"
+          />
+        </div>
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div>
+            <label for="docType" class="block text-xs uppercase tracking-wide text-zinc-500">Type</label>
+            <select
+              id="docType"
+              name="docType"
+              class="mt-1 w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-zinc-500 focus:outline-none"
+            >
+              {DOC_TYPES.map((t) => (
+                <option value={t} selected={t === docType}>{t}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label for="from" class="block text-xs uppercase tracking-wide text-zinc-500">From</label>
+            <input
+              id="from"
+              name="from"
+              type="date"
+              value={from}
+              class="mt-1 w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-zinc-500 focus:outline-none"
+            />
+          </div>
+          <div>
+            <label for="to" class="block text-xs uppercase tracking-wide text-zinc-500">To</label>
+            <input
+              id="to"
+              name="to"
+              type="date"
+              value={to}
+              class="mt-1 w-full rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-zinc-500 focus:outline-none"
+            />
+          </div>
+        </div>
+        <button
+          type="submit"
+          class="rounded border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm font-medium text-zinc-100 hover:bg-zinc-700"
+        >
+          Search
+        </button>
+      </form>
+
+      <section class="mt-8 space-y-3">
+        {q && (
+          <p class="text-xs text-zinc-500">
+            {results.length} {results.length === 1 ? "match" : "matches"} for <span class="text-zinc-300">{q}</span>
+          </p>
+        )}
+        {q && results.length === 0 && (
+          <div class="rounded border border-zinc-800 bg-zinc-900/40 p-6 text-sm text-zinc-400">
+            No matches. Try broadening your filters or check <a href="/new" class="underline hover:text-zinc-200">/new</a> for what's been ingested.
+          </div>
+        )}
+        {results.map((r) => (
+          <DocCard
+            doc={r.doc}
+            snippetHtml={highlight(r.snippet, q)}
+            pageAnchor={r.pageNumber}
+          />
+        ))}
+      </section>
+    </main>
+  </body>
+</html>

@@ -27,7 +27,7 @@ export async function runCrawl(env: Env): Promise<CrawlResult> {
 
   try {
     const indexHtml = await fetchPolitely(env.SOURCE_INDEX_URL, env.USER_AGENT);
-    const pdfUrls = extractPdfUrls(indexHtml, env.SOURCE_INDEX_URL);
+    const pdfUrls = extractPdfUrls(indexHtml, env.SOURCE_INDEX_URL, parseAllowedHosts(env));
 
     for (const url of pdfUrls) {
       try {
@@ -61,19 +61,37 @@ async function fetchPolitely(url: string, userAgent: string): Promise<string> {
   return res.text();
 }
 
-function extractPdfUrls(html: string, baseUrl: string): string[] {
+export function extractPdfUrls(
+  html: string,
+  baseUrl: string,
+  allowedHostSuffixes: readonly string[],
+): string[] {
   const base = new URL(baseUrl);
   const matches = html.matchAll(/href="([^"]+\.pdf[^"]*)"/gi);
   const urls = new Set<string>();
   for (const match of matches) {
     if (!match[1]) continue;
     try {
-      urls.add(new URL(match[1], base).toString());
+      const candidate = new URL(match[1], base);
+      if (candidate.protocol !== "https:" && candidate.protocol !== "http:") continue;
+      const host = candidate.hostname.toLowerCase();
+      const allowed = allowedHostSuffixes.some(
+        (suffix) => host === suffix || host.endsWith(`.${suffix}`),
+      );
+      if (!allowed) continue;
+      urls.add(candidate.toString());
     } catch {
       // skip malformed URL
     }
   }
   return Array.from(urls);
+}
+
+function parseAllowedHosts(env: Env): readonly string[] {
+  return (env.ALLOWED_SOURCE_HOSTS ?? "war.gov")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => s.length > 0);
 }
 
 async function ingestDocument(
@@ -147,7 +165,7 @@ async function ingestDocument(
   return "new";
 }
 
-async function sha256(buf: ArrayBuffer): Promise<string> {
+export async function sha256(buf: ArrayBuffer): Promise<string> {
   const hash = await crypto.subtle.digest("SHA-256", buf);
   return Array.from(new Uint8Array(hash))
     .map((b) => b.toString(16).padStart(2, "0"))

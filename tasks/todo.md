@@ -3,7 +3,13 @@
 **Name**: Blueport (lineage: Project Blue Book, USAF UAP project 1952-1969)
 **Working dir**: `~/Documents/Code/blueport/`
 **Repo**: public from day one, AGPL 3.0
-**Status**: Phase 0 — pending domain + OCR confirmation
+**Status**: Phase 1 — yalla v0.1 ship in progress
+
+## yalla v0.1 acceptance criteria
+
+1. **AC1 — Installs and builds clean**: `pnpm install`, `pnpm typecheck`, and `pnpm build` all exit 0 from a fresh clone.
+2. **AC2 — All v0.1 surfaces render**: `/`, `/search?q=...`, `/doc/[sha]`, `/new`, and `/rss.xml` exist as Astro routes, each renders without crashing on empty/missing data, and the search route honors `q` and basic filters.
+3. **AC3 — Documented and released**: README updated with setup + architecture + deploy steps, `ARCHITECTURE.md` + `CONTRIBUTING.md` + `CHANGELOG.md` exist, work shipped via PR (not direct main push), and a `v0.1.0` git tag is pushed to GitHub.
 **Started**: 2026-05-09
 
 ---

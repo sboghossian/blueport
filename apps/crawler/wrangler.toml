@@ -34,6 +34,7 @@ binding = "BROWSER"
 
 [vars]
 USER_AGENT = "BlueportBot/0.2 (+https://github.com/sboghossian/blueport)"
+LLM_MODEL = "anthropic/claude-haiku-4.5"
 # Sources are defined in packages/db/src/connectors.ts (the connector registry),
 # not here — adding a government release = adding one entry there.
-# CRAWL_ADMIN_TOKEN is set via `wrangler secret put CRAWL_ADMIN_TOKEN`
+# Secrets (set via `wrangler secret put <NAME>`): OPENROUTER_API_KEY, CRAWL_ADMIN_TOKEN

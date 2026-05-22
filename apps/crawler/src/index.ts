@@ -10,7 +10,9 @@ export interface Env {
   // Cloudflare Browser Rendering binding (headless Chrome for browser connectors).
   BROWSER: BrowserWorker;
   USER_AGENT: string;
-  ANTHROPIC_API_KEY: string;
+  // OpenRouter (OpenAI-compatible) for entity extraction + PDF OCR fallback.
+  OPENROUTER_API_KEY: string;
+  LLM_MODEL?: string;
   CRAWL_ADMIN_TOKEN: string;
 }
 

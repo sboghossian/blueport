@@ -53,11 +53,12 @@ describe("parsePageTags", () => {
     expect(out[0]?.hasRedactions).toBe(true);
   });
 
-  it("sets ocrModel to claude-haiku-4-5", () => {
-    const input = '<page n="1">x</page>';
-    const out = parsePageTags(input);
-    expect(out[0]?.ocrModel).toBe("claude-haiku-4-5");
+  it("defaults ocrModel to claude-haiku-4.5 and honors an override", () => {
+    const out = parsePageTags('<page n="1">x</page>');
+    expect(out[0]?.ocrModel).toBe("claude-haiku-4.5");
     expect(out[0]?.ocrConfidence).toBeNull();
+    const overridden = parsePageTags('<page n="1">x</page>', "anthropic/claude-sonnet-4.6");
+    expect(overridden[0]?.ocrModel).toBe("anthropic/claude-sonnet-4.6");
   });
 });
 

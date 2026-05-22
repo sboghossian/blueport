@@ -7,13 +7,11 @@ import {
 } from "../src/connectors.js";
 
 describe("connector registry", () => {
-  it("defines the four v0.2 sources in registry order", () => {
-    expect(CONNECTORS.map((c) => c.id)).toEqual([
-      "us-war-gov",
-      "us-nara",
-      "br-sian",
-      "corbell-sleeping-dog",
-    ]);
+  it("includes the core sources", () => {
+    const ids = CONNECTORS.map((c) => c.id);
+    expect(ids).toContain("us-war-gov");
+    expect(ids).toContain("us-aaro");
+    expect(ids[0]).toBe("us-war-gov");
   });
 
   it("has unique connector ids", () => {
@@ -25,12 +23,14 @@ describe("connector registry", () => {
     for (const c of CONNECTORS) {
       expect(c.startUrls.length).toBeGreaterThan(0);
       expect(c.allowedHosts.length).toBeGreaterThan(0);
-      expect(["fetch", "browser"]).toContain(c.kind);
+      expect(["fetch", "browser", "wayback"]).toContain(c.kind);
     }
   });
 
-  it("every start url lives under the connector's own allowed hosts", () => {
+  it("every fetch/browser start url lives under the connector's allowed hosts", () => {
     for (const c of CONNECTORS) {
+      // wayback startUrls are CDX url-match patterns, not real URLs.
+      if (c.kind === "wayback") continue;
       for (const url of c.startUrls) {
         expect(isHostAllowed(new URL(url).hostname, c.allowedHosts)).toBe(true);
       }

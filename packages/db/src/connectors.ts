@@ -3,11 +3,15 @@ import type { MediaType } from "./schema.js";
 /**
  * How a source is ingested.
  * - `fetch`: a static HTML index whose `.pdf` links we follow with plain
- *   `fetch()`. Cheapest path; works for government portals like war.gov.
+ *   `fetch()`. Cheapest path; works for static government portals.
  * - `browser`: a JS-rendered / session-gated site that needs a real headless
  *   browser (Cloudflare Browser Rendering) to expose its document links.
+ * - `wayback`: an anti-bot or JS-only source we reach through the Internet
+ *   Archive's Wayback Machine. `startUrls` hold CDX url-match patterns (not
+ *   real URLs); discovery queries the CDX API for archived PDFs and fetches the
+ *   raw bytes via web.archive.org. Robust against 403s and JS-only portals.
  */
-export type ConnectorKind = "fetch" | "browser";
+export type ConnectorKind = "fetch" | "browser" | "wayback";
 
 /** ISO-3166 alpha-2 of the releasing government. */
 export type Country = "US" | "BR";
@@ -39,6 +43,8 @@ export interface Connector {
    * fabricate filenames. Empty until real items are sourced.
    */
   seedReferenced?: readonly ReferencedSeed[];
+  /** Cap on documents ingested per run (keeps a crawl inside Worker limits). */
+  maxDocs?: number;
 }
 
 /**
@@ -92,6 +98,18 @@ export const CONNECTORS: readonly Connector[] = [
     // Corbell + Knapp named ~46 unreleased UAP videos to Congress. The exact
     // filenames are not yet public; seed them here ONLY when each is verifiable.
     seedReferenced: [],
+  },
+  {
+    id: "us-aaro",
+    label: "U.S. AARO — DoD All-domain Anomaly Resolution Office",
+    country: "US",
+    kind: "wayback",
+    // CDX url-match patterns (NOT live URLs). aaro.mil hard-403s direct fetches,
+    // so we pull its archived UAP PDFs from the Wayback Machine. UAP trend
+    // reports first, then briefings/records.
+    startUrls: ["aaro.mil/Portals/136/Images/UAP*", "aaro.mil/Portals/136/PDFs*"],
+    allowedHosts: ["web.archive.org", "aaro.mil"],
+    maxDocs: 15,
   },
 ] as const;
 

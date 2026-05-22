@@ -1,5 +1,5 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { extractText, getDocumentProxy } from "unpdf";
+import { chatPdf, hasLlm, llmModel } from "./llm.js";
 import type { Env } from "./index.js";
 
 export interface OcrPage {
@@ -12,22 +12,32 @@ export interface OcrPage {
 
 const TEXT_LAYER_MIN_AVG_CHARS = 50;
 
+/**
+ * OCR a PDF. Strategy: free `unpdf` text-layer first; if it's too sparse and an
+ * LLM is configured, fall back to a vision pass via OpenRouter. Never throws —
+ * on fallback failure (or no LLM) it returns whatever the text layer yielded,
+ * so the document still ingests rather than orphaning its R2 object.
+ */
 export async function ocrPdf(env: Env, pdf: ArrayBuffer): Promise<OcrPage[]> {
-  const textLayer = await tryTextLayer(pdf);
-  if (textLayer) return textLayer;
-  return claudePdfOcr(env, pdf);
+  const textLayer = await extractTextLayer(pdf);
+  if (avgChars(textLayer) >= TEXT_LAYER_MIN_AVG_CHARS) return textLayer;
+
+  if (hasLlm(env)) {
+    try {
+      const vision = await claudePdfOcr(env, pdf);
+      if (vision.length > 0) return vision;
+    } catch {
+      // fall through to the (sparse) text layer
+    }
+  }
+  return textLayer;
 }
 
-async function tryTextLayer(pdf: ArrayBuffer): Promise<OcrPage[] | null> {
+async function extractTextLayer(pdf: ArrayBuffer): Promise<OcrPage[]> {
   try {
     const doc = await getDocumentProxy(new Uint8Array(pdf));
     const result = await extractText(doc, { mergePages: false });
     const pageTexts = Array.isArray(result.text) ? result.text : [result.text];
-
-    const totalChars = pageTexts.reduce((sum, p) => sum + (p?.length ?? 0), 0);
-    const avgChars = pageTexts.length > 0 ? totalChars / pageTexts.length : 0;
-    if (avgChars < TEXT_LAYER_MIN_AVG_CHARS) return null;
-
     return pageTexts.map((text, i) => ({
       pageNumber: i + 1,
       text: (text ?? "").trim(),
@@ -36,50 +46,34 @@ async function tryTextLayer(pdf: ArrayBuffer): Promise<OcrPage[] | null> {
       hasRedactions: detectRedactions(text ?? ""),
     }));
   } catch {
-    return null;
+    return [];
   }
 }
 
-async function claudePdfOcr(env: Env, pdf: ArrayBuffer): Promise<OcrPage[]> {
-  const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
-  const data = arrayBufferToBase64(pdf);
-
-  const response = await client.messages.create({
-    model: "claude-haiku-4-5-20251001",
-    max_tokens: 8000,
-    messages: [
-      {
-        role: "user",
-        content: [
-          {
-            type: "document",
-            source: { type: "base64", media_type: "application/pdf", data },
-          },
-          {
-            type: "text",
-            text: [
-              "Transcribe this document page by page.",
-              "Output exactly:",
-              "<page n=\"1\">\nfull text of page 1\n</page>\n<page n=\"2\">\n...",
-              "Preserve original layout where reasonable.",
-              "Mark any redacted spans inline as [REDACTED] (black bars, classification stamps, [REDACTED] markers).",
-              "Output ONLY the <page> tags. No commentary.",
-            ].join("\n"),
-          },
-        ],
-      },
-    ],
-  });
-
-  const text = response.content
-    .filter((block): block is Anthropic.TextBlock => block.type === "text")
-    .map((block) => block.text)
-    .join("");
-
-  return parsePageTags(text);
+function avgChars(pages: OcrPage[]): number {
+  if (pages.length === 0) return 0;
+  const total = pages.reduce((sum, p) => sum + p.text.length, 0);
+  return total / pages.length;
 }
 
-export function parsePageTags(text: string): OcrPage[] {
+async function claudePdfOcr(env: Env, pdf: ArrayBuffer): Promise<OcrPage[]> {
+  const text = await chatPdf(env, {
+    maxTokens: 8000,
+    filename: "document.pdf",
+    pdfBase64: arrayBufferToBase64(pdf),
+    prompt: [
+      "Transcribe this document page by page.",
+      "Output exactly:",
+      '<page n="1">\nfull text of page 1\n</page>\n<page n="2">\n...',
+      "Preserve original layout where reasonable.",
+      "Mark any redacted spans inline as [REDACTED] (black bars, classification stamps, [REDACTED] markers).",
+      "Output ONLY the <page> tags. No commentary.",
+    ].join("\n"),
+  });
+  return parsePageTags(text, llmModel(env));
+}
+
+export function parsePageTags(text: string, ocrModel = "claude-haiku-4.5"): OcrPage[] {
   const pages: OcrPage[] = [];
   const pattern = /<page n="(\d+)">([\s\S]*?)<\/page>/g;
   let match: RegExpExecArray | null;
@@ -88,7 +82,7 @@ export function parsePageTags(text: string): OcrPage[] {
     pages.push({
       pageNumber: Number(match[1]),
       text: body,
-      ocrModel: "claude-haiku-4-5",
+      ocrModel,
       ocrConfidence: null,
       hasRedactions: detectRedactions(body),
     });

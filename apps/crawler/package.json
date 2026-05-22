@@ -13,7 +13,6 @@
   },
   "dependencies": {
     "hono": "^4.6.13",
-    "@anthropic-ai/sdk": "^0.40.0",
     "@blueport/db": "workspace:*",
     "@cloudflare/puppeteer": "^1.1.0",
     "unpdf": "^0.12.1",

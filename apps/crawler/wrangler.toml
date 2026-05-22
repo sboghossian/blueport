@@ -12,7 +12,7 @@ crons = ["0 */6 * * *"] # every 6 hours
 [[d1_databases]]
 binding = "DB"
 database_name = "blueport"
-database_id = "REPLACE_ME"
+database_id = "698e6b1b-2ef0-4b29-b52b-2e8f2d897149"
 
 [[r2_buckets]]
 binding = "DOCS"

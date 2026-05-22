@@ -1,0 +1,118 @@
+---
+import nuforc from "../data/nuforc.json";
+import { project, MAP_WIDTH, MAP_HEIGHT } from "../lib/geo";
+
+interface Cell { lat: number; lng: number; n: number }
+
+const cells = nuforc.cells as Cell[];
+const shapes = nuforc.shapes as { shape: string; n: number }[];
+const decades = nuforc.decades as { decade: number; n: number }[];
+const countries = nuforc.countries as { country: string; n: number }[];
+const [minYear, maxYear] = nuforc.yearRange as [number, number];
+
+const maxCell = Math.max(1, ...cells.map((c) => c.n));
+const dots = cells.map((c) => {
+  const { x, y } = project(c.lng, c.lat);
+  return { x, y, r: 0.8 + Math.sqrt(c.n / maxCell) * 7, n: c.n };
+});
+
+const verticals: number[] = [];
+for (let lon = 0; lon <= 360; lon += 30) verticals.push((lon / 360) * MAP_WIDTH);
+const horizontals: number[] = [];
+for (let lat = 0; lat <= 180; lat += 30) horizontals.push((lat / 180) * MAP_HEIGHT);
+
+const maxShape = Math.max(1, ...shapes.map((s) => s.n));
+const maxDecade = Math.max(1, ...decades.map((d) => d.n));
+const nf = new Intl.NumberFormat("en-US");
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <title>Sightings map · Blueport</title>
+    <meta name="description" content="Where UFO/UAP sightings are reported — NUFORC, geolocated." />
+  </head>
+  <body class="bg-zinc-950 text-zinc-100 font-mono">
+    <main class="max-w-4xl mx-auto px-6 py-12">
+      <header class="mb-8 flex items-baseline justify-between">
+        <div>
+          <a href="/" class="text-xs text-zinc-500 hover:text-zinc-200">← Blueport</a>
+          <h1 class="mt-2 text-2xl font-bold tracking-tight">Sightings map</h1>
+          <p class="mt-1 text-sm text-zinc-500">
+            Where civilian UFO/UAP sightings are reported, {minYear}–{maxYear}.
+          </p>
+        </div>
+        <a href="/activity" class="text-xs text-zinc-500 hover:text-zinc-200">activity →</a>
+      </header>
+
+      <section class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4">
+          <div class="text-2xl font-bold text-amber-400">{nf.format(nuforc.total)}</div>
+          <div class="mt-1 text-xs uppercase tracking-wide text-zinc-500">sightings</div>
+        </div>
+        <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4">
+          <div class="text-2xl font-bold text-zinc-100">{nf.format(nuforc.geolocated)}</div>
+          <div class="mt-1 text-xs uppercase tracking-wide text-zinc-500">geolocated</div>
+        </div>
+        <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4">
+          <div class="text-2xl font-bold text-zinc-100">{maxYear - minYear}y</div>
+          <div class="mt-1 text-xs uppercase tracking-wide text-zinc-500">span</div>
+        </div>
+        <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4">
+          <div class="text-2xl font-bold text-zinc-100 capitalize">{shapes[0]?.shape}</div>
+          <div class="mt-1 text-xs uppercase tracking-wide text-zinc-500">top shape</div>
+        </div>
+      </section>
+
+      <section class="mt-6 rounded border border-zinc-800 bg-zinc-900/40 p-4">
+        <h2 class="mb-3 text-xs uppercase tracking-wide text-zinc-500">Reporting density</h2>
+        <svg viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`} class="w-full h-auto" role="img" aria-label="Density map of UFO sightings">
+          <rect x="0" y="0" width={MAP_WIDTH} height={MAP_HEIGHT} fill="#0b0b0e" />
+          {verticals.map((x) => <line x1={x} y1="0" x2={x} y2={MAP_HEIGHT} stroke="#27272a" stroke-width="0.3" />)}
+          {horizontals.map((y) => <line x1="0" y1={y} x2={MAP_WIDTH} y2={y} stroke="#27272a" stroke-width="0.3" />)}
+          {dots.map((d) => (
+            <circle cx={d.x} cy={d.y} r={d.r} fill="#fbbf24" fill-opacity="0.35" />
+          ))}
+        </svg>
+        <p class="mt-2 text-xs text-zinc-600">Each dot = a {nuforc.gridDeg}° grid cell, sized by report count. Reporting concentrates where observers + reporting infrastructure are (overwhelmingly the US).</p>
+      </section>
+
+      <section class="mt-6 grid grid-cols-1 gap-6 sm:grid-cols-2">
+        <div>
+          <h2 class="mb-3 text-xs uppercase tracking-wide text-zinc-500">Reported shapes</h2>
+          <ul class="space-y-1.5">
+            {shapes.map((s) => (
+              <li class="flex items-center gap-2 text-xs">
+                <span class="w-20 shrink-0 truncate capitalize text-zinc-400">{s.shape}</span>
+                <span class="h-3 rounded-sm bg-amber-400/70" style={`width:${Math.max(2, (s.n / maxShape) * 100)}%`}></span>
+                <span class="shrink-0 text-zinc-500">{nf.format(s.n)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div>
+          <h2 class="mb-3 text-xs uppercase tracking-wide text-zinc-500">Sightings by decade</h2>
+          <ul class="space-y-1.5">
+            {decades.map((d) => (
+              <li class="flex items-center gap-2 text-xs">
+                <span class="w-12 shrink-0 text-zinc-400">{d.decade}s</span>
+                <span class="h-3 rounded-sm bg-sky-400/60" style={`width:${Math.max(2, (d.n / maxDecade) * 100)}%`}></span>
+                <span class="shrink-0 text-zinc-500">{nf.format(d.n)}</span>
+              </li>
+            ))}
+          </ul>
+          <h2 class="mt-5 mb-2 text-xs uppercase tracking-wide text-zinc-500">Top countries</h2>
+          <ul class="flex flex-wrap gap-x-3 gap-y-1 text-xs text-zinc-500">
+            {countries.map((c) => <li><span class="uppercase text-zinc-300">{c.country}</span> {nf.format(c.n)}</li>)}
+          </ul>
+        </div>
+      </section>
+
+      <footer class="mt-12 border-t border-zinc-900 pt-6 text-xs text-zinc-600">
+        <span>Source: {nuforc.source}. Geolocated civilian reports — distinct from the government document corpus on <a href="/activity" class="underline hover:text-zinc-300">/activity</a>.</span>
+      </footer>
+    </main>
+  </body>
+</html>

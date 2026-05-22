@@ -98,7 +98,10 @@ function relative(d: Date): string {
             What's releasing, when, and from where — across {CONNECTORS.length} sources.
           </p>
         </div>
-        <a href="/new" class="text-xs text-zinc-500 hover:text-zinc-200">newest →</a>
+        <span class="flex gap-4 text-xs text-zinc-500">
+          <a href="/map" class="hover:text-zinc-200">map →</a>
+          <a href="/new" class="hover:text-zinc-200">newest →</a>
+        </span>
       </header>
 
       {isEmpty && (

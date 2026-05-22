@@ -9,6 +9,7 @@ import {
 } from "@blueport/db/connectors";
 import { ocrPdf } from "./ocr.js";
 import { extract } from "./extract.js";
+import { hasLlm } from "./llm.js";
 import type { Env } from "./index.js";
 
 export interface ConnectorResult {
@@ -103,6 +104,11 @@ async function crawlConnector(
 
 /** Resolve a connector's start pages into a deduped list of assets to ingest. */
 async function discover(env: Env, connector: Connector): Promise<DiscoveredAsset[]> {
+  if (connector.kind === "wayback") {
+    const assets = await discoverWayback(env, connector);
+    return connector.maxDocs ? assets.slice(0, connector.maxDocs) : assets;
+  }
+
   if (connector.kind === "browser") {
     // Loaded lazily: @cloudflare/puppeteer is Workers-only, so keeping it out of
     // the static graph lets the fetch path + unit tests run without it.
@@ -127,6 +133,62 @@ async function discover(env: Env, connector: Connector): Promise<DiscoveredAsset
     }
   }
   return dedupeByUrl(out);
+}
+
+/**
+ * Discover archived PDFs for a `wayback` connector via the Internet Archive CDX
+ * API. Each `startUrls` entry is a CDX url-match pattern; we keep one capture
+ * per content digest and fetch raw bytes through the `id_` raw endpoint.
+ */
+async function discoverWayback(env: Env, connector: Connector): Promise<DiscoveredAsset[]> {
+  const out = new Map<string, DiscoveredAsset>();
+  const limit = connector.maxDocs ?? 25;
+
+  for (const pattern of connector.startUrls) {
+    const cdx = new URL("https://web.archive.org/cdx/search/cdx");
+    cdx.searchParams.set("url", pattern);
+    cdx.searchParams.set("output", "json");
+    cdx.searchParams.set("fl", "timestamp,original");
+    cdx.searchParams.append("filter", "mimetype:application/pdf");
+    cdx.searchParams.append("filter", "statuscode:200");
+    cdx.searchParams.set("collapse", "digest");
+    cdx.searchParams.set("limit", String(limit));
+
+    const res = await fetch(cdx.toString(), { headers: { "user-agent": env.USER_AGENT } });
+    if (!res.ok) continue;
+    const rows = (await res.json()) as string[][];
+
+    // Row 0 is the [timestamp, original] header; data rows follow.
+    for (const row of rows.slice(1)) {
+      const timestamp = row[0];
+      const original = row[1];
+      if (!timestamp || !original) continue;
+      const url = `https://web.archive.org/web/${timestamp}id_/${original}`;
+      if (out.has(url)) continue;
+      out.set(url, {
+        url,
+        title: waybackTitle(original),
+        mediaType: "pdf",
+        status: "released",
+        download: true,
+      });
+    }
+  }
+  return Array.from(out.values());
+}
+
+function waybackTitle(original: string): string | null {
+  try {
+    const base = decodeURIComponent(new URL(original).pathname.split("/").pop() ?? "");
+    const name = base
+      .replace(/\.pdf$/i, "")
+      .replace(/[_%]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return name || null;
+  } catch {
+    return null;
+  }
 }
 
 async function ingestAsset(
@@ -169,7 +231,14 @@ async function ingestFile(
   let extraction: Awaited<ReturnType<typeof extract>> | null = null;
   if (asset.mediaType === "pdf") {
     pageData = await ocrPdf(env, buf);
-    extraction = await extract(env, pageData.map((p) => p.text).join("\n\n"));
+    if (hasLlm(env)) {
+      try {
+        extraction = await extract(env, pageData.map((p) => p.text).join("\n\n"));
+      } catch {
+        // Best-effort: keep the document (with OCR text) even if extraction
+        // fails, so the R2 object isn't orphaned. A missing summary is the signal.
+      }
+    }
   }
 
   await db.insert(documents).values({
@@ -191,21 +260,23 @@ async function ingestFile(
     summary: extraction?.summary ?? null,
   });
 
-  if (pageData.length > 0) {
-    await db.insert(pages).values(
-      pageData.map((p) => ({
-        docSha: sha,
-        pageNumber: p.pageNumber,
-        text: p.text,
-        ocrModel: p.ocrModel,
-        ocrConfidence: p.ocrConfidence,
-        hasRedactions: p.hasRedactions,
-      })),
-    );
-  }
+  // D1 caps bound variables per statement, so batch inserts must be chunked
+  // (a long PDF would otherwise blow the limit: "too many SQL variables").
+  await chunkedInsert(
+    pageData.map((p) => ({
+      docSha: sha,
+      pageNumber: p.pageNumber,
+      text: p.text,
+      ocrModel: p.ocrModel,
+      ocrConfidence: p.ocrConfidence,
+      hasRedactions: p.hasRedactions,
+    })),
+    PAGE_CHUNK,
+    (rows) => db.insert(pages).values(rows),
+  );
 
-  if (extraction && extraction.entities.length > 0) {
-    await db.insert(entities).values(
+  if (extraction) {
+    await chunkedInsert(
       extraction.entities.map((e) => ({
         docSha: sha,
         pageNumber: null,
@@ -213,6 +284,8 @@ async function ingestFile(
         value: e.value,
         normalized: e.normalized,
       })),
+      ENTITY_CHUNK,
+      (rows) => db.insert(entities).values(rows),
     );
   }
 
@@ -321,6 +394,21 @@ function hostOf(url: string | undefined): string | null {
     return new URL(url).hostname;
   } catch {
     return null;
+  }
+}
+
+// pages have 6 columns, entities 5 — keep each statement's bound-variable count
+// well under D1's per-statement cap.
+const PAGE_CHUNK = 15;
+const ENTITY_CHUNK = 20;
+
+async function chunkedInsert<Row>(
+  rows: Row[],
+  chunkSize: number,
+  insert: (rows: Row[]) => Promise<unknown>,
+): Promise<void> {
+  for (let i = 0; i < rows.length; i += chunkSize) {
+    await insert(rows.slice(i, i + chunkSize));
   }
 }
 

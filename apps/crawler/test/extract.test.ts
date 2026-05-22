@@ -1,55 +1,46 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { extract, stripJsonFence } from "../src/extract.js";
+import type { Env } from "../src/index.js";
 
-// Capture the most recent request payload sent to messages.create() so each
-// test can assert on its shape without standing up a real SDK.
-interface CapturedRequest {
+// Capture the most recent OpenRouter request body so each test can assert on
+// its shape without a real network call.
+interface CapturedBody {
   model: string;
   max_tokens: number;
-  system?: string;
   messages: Array<{ role: string; content: string }>;
 }
 
-const capture: { last: CapturedRequest | null; reply: string } = {
+const capture: { last: CapturedBody | null; reply: string } = {
   last: null,
   reply: "",
 };
 
-vi.mock("@anthropic-ai/sdk", () => {
-  class MockAnthropic {
-    messages = {
-      create: async (req: CapturedRequest) => {
-        capture.last = req;
-        return {
-          content: capture.reply
-            ? [{ type: "text" as const, text: capture.reply }]
-            : [],
-        };
-      },
-    };
-    constructor(_opts: { apiKey: string }) {
-      // no-op
-    }
-  }
-  return { default: MockAnthropic };
-});
-
-// Import AFTER vi.mock so the mock is applied.
-import { extract, stripJsonFence } from "../src/extract.js";
-import type { Env } from "../src/index.js";
-
 function makeEnv(): Env {
-  // Only ANTHROPIC_API_KEY is read by extract(); cast through unknown to satisfy
-  // the full Env shape without pulling cloudflare bindings into a unit test.
-  return { ANTHROPIC_API_KEY: "test-key" } as unknown as Env;
+  // Only OPENROUTER_API_KEY / LLM_MODEL are read by the LLM layer; cast through
+  // unknown to satisfy the full Env shape without cloudflare bindings.
+  return { OPENROUTER_API_KEY: "test-key" } as unknown as Env;
 }
 
 beforeEach(() => {
   capture.last = null;
   capture.reply = "";
+  vi.stubGlobal("fetch", async (_url: string, init: { body: string }) => {
+    capture.last = JSON.parse(init.body) as CapturedBody;
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content: capture.reply } }] }),
+      text: async () => "",
+    } as unknown as Response;
+  });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe("extract", () => {
-  it("sends the Haiku model id", async () => {
+  it("sends the default Haiku-4.5 OpenRouter model id", async () => {
     capture.reply = JSON.stringify({
       title: "t",
       docType: "memo",
@@ -59,7 +50,7 @@ describe("extract", () => {
       entities: [],
     });
     await extract(makeEnv(), "hello");
-    expect(capture.last?.model).toBe("claude-haiku-4-5-20251001");
+    expect(capture.last?.model).toBe("anthropic/claude-haiku-4.5");
   });
 
   it("parses well-formed JSON into Extraction with Date conversion", async () => {
@@ -87,11 +78,9 @@ describe("extract", () => {
     expect(result.entities[1]?.normalized).toBeNull();
   });
 
-  it("throws a clean error on empty content blocks", async () => {
+  it("throws a clean error on empty response content", async () => {
     capture.reply = "";
-    await expect(extract(makeEnv(), "x")).rejects.toThrow(
-      /empty response from Claude/,
-    );
+    await expect(extract(makeEnv(), "x")).rejects.toThrow(/empty response from LLM/);
   });
 
   it("truncates input over MAX_INPUT_CHARS (50_000)", async () => {
@@ -103,17 +92,28 @@ describe("extract", () => {
       summary: "",
       entities: [],
     });
-    // Use a sentinel char that doesn't appear in the prompt text so we can
-    // count occurrences without false positives from the surrounding prose.
     const SENTINEL = "Z";
     const huge = SENTINEL.repeat(60_000);
     await extract(makeEnv(), huge);
-    const sent = capture.last?.messages[0]?.content ?? "";
+    const sent = capture.last?.messages.at(-1)?.content ?? "";
     const sentinelCount = (sent.match(/Z/g) ?? []).length;
     expect(sentinelCount).toBeLessThanOrEqual(50_000);
     expect(sentinelCount).toBeGreaterThan(0);
-    // Total payload length should not include the original 60k of input.
     expect(sent.length).toBeLessThan(60_000);
+  });
+
+  it("sends a system message plus the user prompt", async () => {
+    capture.reply = JSON.stringify({
+      title: null,
+      docType: "other",
+      documentDate: null,
+      incidentDate: null,
+      summary: "",
+      entities: [],
+    });
+    await extract(makeEnv(), "doc");
+    expect(capture.last?.messages[0]?.role).toBe("system");
+    expect(capture.last?.messages.at(-1)?.role).toBe("user");
   });
 
   it("parses fenced JSON wrapped in ```json ... ```", async () => {

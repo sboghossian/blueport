@@ -1,4 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { chatText } from "./llm.js";
 import type { Env } from "./index.js";
 
 export type DocType = "incident_report" | "memo" | "hearing" | "other";
@@ -30,28 +30,18 @@ export function stripJsonFence(text: string): string {
 }
 
 export async function extract(env: Env, fullText: string): Promise<Extraction> {
-  const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
   const truncated = fullText.slice(0, MAX_INPUT_CHARS);
 
-  const response = await client.messages.create({
-    model: "claude-haiku-4-5-20251001",
-    max_tokens: 2000,
+  const text = await chatText(env, {
+    maxTokens: 2000,
     system:
       "You extract structured metadata from declassified UAP/UFO documents. Output ONLY valid JSON matching the schema. No commentary, no markdown fence.",
-    messages: [
-      {
-        role: "user",
-        content: `Extract metadata from this document:\n\n${truncated}\n\nOutput JSON with this exact schema:\n{\n  "title": string | null,\n  "docType": "incident_report" | "memo" | "hearing" | "other",\n  "documentDate": "YYYY-MM-DD" | null,\n  "incidentDate": "YYYY-MM-DD" | null,\n  "summary": string,\n  "entities": [\n    { "kind": "person" | "location" | "unit" | "craft" | "sensor" | "date", "value": string, "normalized": string | null }\n  ]\n}\n\nRules:\n- title: from the doc itself, or null if unclear\n- documentDate: when the doc was authored\n- incidentDate: when the UAP event occurred (may equal documentDate or be null)\n- summary: 2-3 sentences, factual, no editorial framing or speculation\n- entities: up to 30 most important; "value" as it appears, "normalized" canonical (e.g. "USS Nimitz" not "the Nimitz")`,
-      },
-    ],
+    prompt: `Extract metadata from this document:\n\n${truncated}\n\nOutput JSON with this exact schema:\n{\n  "title": string | null,\n  "docType": "incident_report" | "memo" | "hearing" | "other",\n  "documentDate": "YYYY-MM-DD" | null,\n  "incidentDate": "YYYY-MM-DD" | null,\n  "summary": string,\n  "entities": [\n    { "kind": "person" | "location" | "unit" | "craft" | "sensor" | "date", "value": string, "normalized": string | null }\n  ]\n}\n\nRules:\n- title: from the doc itself, or null if unclear\n- documentDate: when the doc was authored\n- incidentDate: when the UAP event occurred (may equal documentDate or be null)\n- summary: 2-3 sentences, factual, no editorial framing or speculation\n- entities: up to 30 most important; "value" as it appears, "normalized" canonical (e.g. "USS Nimitz" not "the Nimitz")`,
   });
 
-  const textBlock = response.content.find(
-    (block): block is Anthropic.TextBlock => block.type === "text",
-  );
-  if (!textBlock) throw new Error("extract: empty response from Claude");
+  if (!text.trim()) throw new Error("extract: empty response from LLM");
 
-  const json = JSON.parse(stripJsonFence(textBlock.text)) as {
+  const json = JSON.parse(stripJsonFence(text)) as {
     title: string | null;
     docType: DocType;
     documentDate: string | null;

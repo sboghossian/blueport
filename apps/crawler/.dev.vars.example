@@ -2,5 +2,5 @@
 # Copy to `.dev.vars` (gitignored) and fill in real values.
 # Production secrets are set via `wrangler secret put <NAME>`.
 
-ANTHROPIC_API_KEY=
+OPENROUTER_API_KEY=
 CRAWL_ADMIN_TOKEN=

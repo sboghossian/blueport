@@ -6,6 +6,34 @@ Blueport uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Multi-source connector registry** ([`packages/db/src/connectors.ts`](packages/db/src/connectors.ts)): the single hardcoded war.gov crawler is now a registry of typed connectors. Four sources ship: `us-war-gov` (PURSUE 2nd release), `us-nara` (National Archives), `br-sian` (Brazil's Arquivo Nacional), and `corbell-sleeping-dog` (Jeremy Corbell / *Sleeping Dog* leak set). Adding a government release is one registry entry.
+- **Hybrid scrape runtime**: `fetch`-kind connectors crawl static portals with plain `fetch()`; `browser`-kind connectors render JS/session-gated sites with **Cloudflare Browser Rendering** (`@cloudflare/puppeteer`, `[browser]` binding — Workers Paid plan). Browser code is dynamically imported so the fetch path and unit tests never load it.
+- **Generalized media model**: `documents` gains `source_id`, `country`, `media_type` (`pdf` | `image` | `audio` | `video` | `webpage`), and `status` (`released` | `referenced_withheld`). PDFs/images are stored in R2; audio/video are link-only. Items known-but-unreleased (e.g. UAP videos named in a congressional request) are first-class `referenced_withheld` rows — seeded only from verifiable references, never fabricated.
+- **Release-activity dashboard** at `/activity`: released-vs-withheld + country counters, an SVG **world bubble-map** of releases by country, a stacked per-source **releases-over-time** timeline, per-source cards (released / withheld / this-week / last-fetched), and a merged "what's new" feed. Dependency-free inline SVG charts.
+- **Schema migration** `packages/db/drizzle/0001_multisource.sql`: purely additive `ALTER TABLE ADD COLUMN` (no table rebuild) plus new indexes; backfills existing rows to `country = 'US'`. `crawl_runs` gains `source_id` for per-connector run tracking.
+- **Asset link parser** (`apps/crawler/src/assets.ts`): pure, DOM-free extraction of asset links from rendered HTML, reusing the same SSRF host-allowlist + extension rules as the fetch path.
+- **Tests**: connector registry integrity + host guard + media-type mapping, asset extraction, `syntheticSha` determinism, activity color/geo helpers, and new schema columns. Suite now 79 tests.
+
+### Changed
+
+- `runCrawl` iterates all connectors and aggregates per-connector results; `CrawlResult` now carries a `connectors[]` breakdown. R2 keys are `docs/<sha256>.<ext>` (was always `.pdf`).
+- `DocCard` and the document page surface source label, country, media type, and a `withheld` badge; the document page links to the original only when a stored PDF exists, otherwise to source (link-only) or shows a "not released" note.
+- `scripts/migrate.sh` applies every `drizzle/*.sql` migration in lexical order (was `0000_init.sql` only).
+- Crawler `User-Agent` bumped to `BlueportBot/0.2`. Removed the now-unused `SOURCE_INDEX_URL` / `ALLOWED_SOURCE_HOSTS` vars (sources live in the registry).
+
+### Decisions
+
+- **Additive migration over table rebuild** (ADR-0002): relaxing a NOT NULL column in SQLite needs a DROP/recreate, but on D1 migrations run inside a transaction where `PRAGMA foreign_keys=OFF` is a no-op — so the implicit DELETE on DROP would cascade-wipe `pages`/`entities`. We keep `r2_key`/`http_status` NOT NULL and use documented sentinels (`""` / `0`) for link-only and withheld items.
+- **Hybrid connector runtime** (ADR-0001): keep the proven fetch path for static portals; add Browser Rendering only for sources that genuinely need a headless browser.
+
+### Known gaps
+
+- SIAN + Corbell `startUrls` and DOM entry points are best-known but not yet end-to-end DOM-verified against the live sites; the browser connector harvests asset links generically and degrades gracefully, but first-run output should be reviewed.
+- SIAN may require an account to browse; the connector does **not** auto-register accounts.
+- The world map is a centroid bubble-map (not a polygon choropleth) to stay dependency-free.
+
 ## [0.1.0] — 2026-05-09
 
 ### Added

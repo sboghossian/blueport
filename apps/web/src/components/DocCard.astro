@@ -1,5 +1,6 @@
 ---
 import type { documents } from "@blueport/db/schema";
+import { getConnector } from "@blueport/db/connectors";
 
 type Doc = typeof documents.$inferSelect;
 
@@ -19,6 +20,9 @@ const href = pageAnchor != null
 const fetchedLabel = doc.fetchedAt
   ? new Date(doc.fetchedAt).toISOString().slice(0, 10)
   : "—";
+
+const sourceLabel = getConnector(doc.sourceId)?.label ?? doc.sourceDomain;
+const isWithheld = doc.status === "referenced_withheld";
 ---
 
 <a
@@ -31,13 +35,20 @@ const fetchedLabel = doc.fetchedAt
     </h3>
     <span class="shrink-0 text-xs text-zinc-500">{fetchedLabel}</span>
   </div>
-  <div class="mt-1 flex flex-wrap gap-2 text-xs text-zinc-500">
-    {doc.docType && (
-      <span class="rounded bg-zinc-800 px-1.5 py-0.5 text-zinc-300">
-        {doc.docType}
-      </span>
+  <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+    {isWithheld && (
+      <span class="rounded bg-amber-900/40 px-1.5 py-0.5 text-amber-300">withheld</span>
     )}
-    <span>{doc.sourceDomain}</span>
+    {doc.country && (
+      <span class="rounded border border-zinc-700 px-1.5 py-0.5 text-zinc-400">{doc.country}</span>
+    )}
+    {doc.docType && (
+      <span class="rounded bg-zinc-800 px-1.5 py-0.5 text-zinc-300">{doc.docType}</span>
+    )}
+    {doc.mediaType !== "pdf" && (
+      <span class="rounded bg-zinc-800 px-1.5 py-0.5 text-zinc-300">{doc.mediaType}</span>
+    )}
+    <span class="truncate">{sourceLabel}</span>
     {doc.pageCount != null && <span>· {doc.pageCount}p</span>}
   </div>
   {snippetHtml ? (

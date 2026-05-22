@@ -1,0 +1,67 @@
+---
+import type { CountryStat } from "../lib/activity";
+import { COUNTRY_CENTROIDS, project, MAP_WIDTH, MAP_HEIGHT } from "../lib/geo";
+
+interface Props {
+  byCountry: CountryStat[];
+}
+
+const { byCountry } = Astro.props;
+
+const max = Math.max(1, ...byCountry.map((c) => c.total));
+
+const bubbles = byCountry
+  .map((c) => {
+    const centroid = COUNTRY_CENTROIDS[c.country];
+    if (!centroid) return null;
+    const { x, y } = project(centroid.lon, centroid.lat);
+    const r = 2.5 + Math.sqrt(c.total / max) * 13;
+    return { code: c.country, name: centroid.name, total: c.total, x, y, r };
+  })
+  .filter((b): b is NonNullable<typeof b> => b !== null);
+
+// Graticule every 30°, drawn as a faint backdrop so bubbles read as "on a map".
+const verticals: number[] = [];
+for (let lon = 0; lon <= 360; lon += 30) verticals.push((lon / 360) * MAP_WIDTH);
+const horizontals: number[] = [];
+for (let lat = 0; lat <= 180; lat += 30) horizontals.push((lat / 180) * MAP_HEIGHT);
+---
+
+<div class="rounded border border-zinc-800 bg-zinc-900/40 p-4">
+  <h2 class="mb-3 text-xs uppercase tracking-wide text-zinc-500">Where it's releasing</h2>
+  {bubbles.length === 0 ? (
+    <p class="text-sm text-zinc-500">No country-tagged documents yet.</p>
+  ) : (
+    <svg
+      viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}
+      class="w-full h-auto"
+      role="img"
+      aria-label="World map of UAP document releases by country"
+    >
+      <rect x="0" y="0" width={MAP_WIDTH} height={MAP_HEIGHT} fill="#0b0b0e" />
+      {verticals.map((x) => (
+        <line x1={x} y1="0" x2={x} y2={MAP_HEIGHT} stroke="#27272a" stroke-width="0.3" />
+      ))}
+      {horizontals.map((y) => (
+        <line x1="0" y1={y} x2={MAP_WIDTH} y2={y} stroke="#27272a" stroke-width="0.3" />
+      ))}
+      <line x1="0" y1={MAP_HEIGHT / 2} x2={MAP_WIDTH} y2={MAP_HEIGHT / 2} stroke="#3f3f46" stroke-width="0.4" />
+      {bubbles.map((b) => (
+        <g>
+          <circle cx={b.x} cy={b.y} r={b.r} fill="#fbbf24" fill-opacity="0.18" stroke="#fbbf24" stroke-width="0.6" />
+          <circle cx={b.x} cy={b.y} r="0.8" fill="#fde68a" />
+          <text x={b.x} y={b.y - b.r - 1.5} text-anchor="middle" fill="#e4e4e7" font-size="5" font-family="monospace">
+            {b.code} · {b.total}
+          </text>
+        </g>
+      ))}
+    </svg>
+  )}
+  {bubbles.length > 0 && (
+    <ul class="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-500">
+      {bubbles.map((b) => (
+        <li><span class="text-zinc-300">{b.name}</span> · {b.total}</li>
+      ))}
+    </ul>
+  )}
+</div>

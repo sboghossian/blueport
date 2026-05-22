@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { BrowserWorker } from "@cloudflare/puppeteer";
 import { runCrawl } from "./crawl.js";
 
 export interface Env {
@@ -6,11 +7,11 @@ export interface Env {
   DOCS: R2Bucket;
   VECTORS: VectorizeIndex;
   AI: Ai;
+  // Cloudflare Browser Rendering binding (headless Chrome for browser connectors).
+  BROWSER: BrowserWorker;
   USER_AGENT: string;
-  SOURCE_INDEX_URL: string;
   ANTHROPIC_API_KEY: string;
   CRAWL_ADMIN_TOKEN: string;
-  ALLOWED_SOURCE_HOSTS: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();

@@ -1,6 +1,7 @@
 ---
 import type { documents } from "@blueport/db/schema";
 import { getConnector } from "@blueport/db/connectors";
+import { scoreDocument, TIER_STYLES } from "../lib/credibility";
 
 type Doc = typeof documents.$inferSelect;
 
@@ -23,6 +24,7 @@ const fetchedLabel = doc.fetchedAt
 
 const sourceLabel = getConnector(doc.sourceId)?.label ?? doc.sourceDomain;
 const isWithheld = doc.status === "referenced_withheld";
+const cred = scoreDocument(doc);
 ---
 
 <a
@@ -36,6 +38,9 @@ const isWithheld = doc.status === "referenced_withheld";
     <span class="shrink-0 text-xs text-zinc-500">{fetchedLabel}</span>
   </div>
   <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+    <span class={`rounded px-1.5 py-0.5 ${TIER_STYLES[cred.tier]}`} title={`Credibility ${cred.score}/100`}>
+      {cred.tier} {cred.score}
+    </span>
     {isWithheld && (
       <span class="rounded bg-amber-900/40 px-1.5 py-0.5 text-amber-300">withheld</span>
     )}

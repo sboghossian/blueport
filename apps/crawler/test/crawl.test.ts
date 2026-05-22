@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractPdfUrls } from "../src/crawl.js";
+import { extractPdfUrls, syntheticSha, sha256 } from "../src/crawl.js";
 
 const allowed = ["war.gov"] as const;
 
@@ -95,5 +95,20 @@ describe("extractPdfUrls", () => {
     const html = '<a href="file:///etc/passwd.pdf">f</a><a href="ok.pdf">ok</a>';
     const urls = extractPdfUrls(html, baseUrl, allowed);
     expect(urls).toEqual(["https://war.gov/uap/ok.pdf"]);
+  });
+});
+
+describe("syntheticSha", () => {
+  it("is deterministic for the same parts", async () => {
+    expect(await syntheticSha(["a", "b"])).toBe(await syntheticSha(["a", "b"]));
+  });
+
+  it("differs when any part differs", async () => {
+    expect(await syntheticSha(["a", "b"])).not.toBe(await syntheticSha(["a", "c"]));
+  });
+
+  it("produces a 64-char hex digest, like a real sha256", async () => {
+    expect(await syntheticSha(["x"])).toMatch(/^[a-f0-9]{64}$/);
+    expect(await sha256(new ArrayBuffer(8))).toMatch(/^[a-f0-9]{64}$/);
   });
 });

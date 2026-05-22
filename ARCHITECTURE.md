@@ -1,6 +1,8 @@
 # Architecture
 
-Blueport is a Cloudflare-native monorepo. The crawler Worker ingests, OCRs, and extracts metadata from government-released UAP/UFO PDFs; the Astro frontend reads from D1 and R2 to serve search, document pages, and RSS. Every component runs at the Cloudflare edge with no external infrastructure outside the Anthropic Claude API.
+Blueport is a Cloudflare-native monorepo. The crawler Worker iterates a **connector registry** of government/source releases, ingests and OCRs their documents (and links their non-PDF media), and extracts metadata; the Astro frontend reads from D1 and R2 to serve search, document pages, RSS, and a release-activity dashboard. Every component runs at the Cloudflare edge with no external infrastructure outside the Anthropic Claude API and Cloudflare Browser Rendering.
+
+Two ingestion runtimes sit behind one registry: a **fetch** path (plain `fetch()` over static HTML portals → `.pdf` links) and a **browser** path (Cloudflare Browser Rendering / headless Chrome for JS-rendered or session-gated archives). See [ADR-0001](docs/adr/0001-multi-source-connector-registry.md) and [ADR-0002](docs/adr/0002-additive-media-migration.md).
 
 ## System overview
 
@@ -34,9 +36,11 @@ The schema lives in [`packages/db/src/schema.ts`](packages/db/src/schema.ts). Th
 
 ### documents
 
-One row per unique PDF, keyed by `sha256`. Stores provenance (`source_url`, `source_domain`, `fetched_at`, `http_status`, `r2_key`) alongside extracted metadata (`title`, `doc_type`, `page_count`, `document_date`, `incident_date`, `summary`). The `skeptic_take` and `analyst_take` columns are reserved for the v0.3 dual-take generator (Opus). `published_at` gates RSS visibility.
+One row per unique item, keyed by `sha256` (content hash for stored files; a deterministic synthetic hash for link-only and withheld items). Stores connector identity (`source_id`, `country`), provenance (`source_url`, `source_domain`, `fetched_at`, `http_status`, `r2_key`), the media model (`media_type` ∈ {pdf, image, audio, video, webpage}; `status` ∈ {released, referenced_withheld}), and extracted metadata (`title`, `doc_type`, `page_count`, `document_date`, `incident_date`, `summary`). The `skeptic_take`/`analyst_take` columns are reserved for the dual-take generator (Opus). `published_at` gates RSS visibility.
 
-Indexes on `source_url`, `fetched_at`, and `document_date` cover the main query patterns (dedup lookup, chronological listing, date-range filtering).
+`r2_key` and `http_status` are NOT NULL by design (see ADR-0002): link-only media uses `r2_key = ""` (and links out via `source_url`), and `referenced_withheld` items use `r2_key = ""` with `http_status = 0` when never fetched. Read `r2_key` truthiness, not null.
+
+Indexes on `source_url`, `fetched_at`, `document_date`, `source_id`, `country`, and `status` cover dedup lookup, chronological listing, date-range filtering, and the per-source / per-country / released-vs-withheld dashboard aggregations.
 
 ### pages
 
@@ -50,29 +54,47 @@ Indexes on `doc_sha`, `kind`, and `normalized` support per-document entity listi
 
 ### crawl_runs
 
-One row per cron invocation. Records `started_at`, `finished_at`, `source_domain`, `new_documents`, `updated_documents`, and a JSON `errors` array. Used for monitoring and the "last verified" badge on document pages.
+One row per connector per cron invocation. Records `started_at`, `finished_at`, `source_id`, `source_domain`, `new_documents`, `updated_documents`, and a JSON `errors` array. Used for monitoring and the "last verified" / "last fetched" badges.
+
+## Sources & connectors
+
+Sources live in the registry [`packages/db/src/connectors.ts`](packages/db/src/connectors.ts), shared by the crawler (behavior) and the web app (labels/colors). Each `Connector` declares `id`, `label`, `country`, `kind` (`fetch` | `browser`), `startUrls`, `allowedHosts` (SSRF allowlist), and optional `seedReferenced` items.
+
+| id | country | kind | what |
+|---|---|---|---|
+| `us-war-gov` | US | fetch | DoW war.gov/UFO PURSUE release |
+| `us-nara` | US | fetch | National Archives UAP records |
+| `br-sian` | BR | browser | Brazil Arquivo Nacional (SIAN) |
+| `corbell-sleeping-dog` | US | browser | Jeremy Corbell / *Sleeping Dog* leak set |
+
+`seedReferenced` entries must carry a verifiable public `sourceUrl`; filenames are never fabricated (enforced by a registry test).
 
 ## Ingestion pipeline
 
-Each step maps to a file and function in `apps/crawler/src/`.
+`runCrawl` iterates `CONNECTORS`; each becomes a `crawl_runs` row and a `crawlConnector` call. Steps map to files in `apps/crawler/src/`.
 
-1. **Fetch index** (`crawl.ts` → `runCrawl` → `fetchPolitely`): GET `SOURCE_INDEX_URL` with a single identifiable `User-Agent` header. No parallelism — one request at a time.
+1. **Discover** (`crawl.ts` → `discover`):
+   - `fetch` kind: GET each `startUrl` with a single identifiable `User-Agent` (one request at a time) and parse `.pdf` links via `extractPdfUrls`, resolved against the base and SSRF-filtered by the connector's `allowedHosts`.
+   - `browser` kind: dynamically import `browser.ts` → `discoverViaBrowser`, which launches Cloudflare Browser Rendering, `page.goto` + `page.content()` per start URL, then `assets.ts` → `extractAssetLinks` harvests `.pdf/.jpg/.mp3/.mp4/…` links (same host + extension rules). `seedReferenced` items are appended as `referenced_withheld` assets.
 
-2. **Parse PDF links** (`crawl.ts` → `extractPdfUrls`): regex match on `href="*.pdf"` attributes, resolved against the base URL, deduplicated into a `Set`.
+2. **Classify** (`assets.ts` → `classifyAssetUrl`): map extension → `media_type`. PDFs/images are flagged `download: true`; audio/video are link-only.
 
-3. **Hash and dedup** (`crawl.ts` → `ingestDocument` → `sha256`): compute SHA-256 of the raw bytes via `crypto.subtle.digest`. Query D1 for the hash. If found, return `"unchanged"` and skip.
+3. **Ingest** (`crawl.ts` → `ingestAsset`), branching on status/media:
+   - `ingestFile` (pdf/image): fetch bytes → SHA-256 (`sha256`) → dedup → `PUT docs/<sha>.<ext>` (never overwritten) → for PDFs, OCR + entity extraction.
+   - `ingestLinked` (audio/video/webpage): record with `r2_key = ""`, deterministic `syntheticSha`.
+   - `ingestReferenced` (withheld): record with `r2_key = ""`, `status = referenced_withheld`, synthetic hash.
 
-4. **Upload to R2** (`crawl.ts` → `ingestDocument`): `PUT docs/<sha256>.pdf` with `contentType: application/pdf` and custom metadata (`sourceUrl`, `fetchedAt`). Objects are never overwritten.
+4. **OCR** (`ocr.ts` → `ocrPdf`): `unpdf` text-layer first; below 50 avg chars/page, fall back to `claudePdfOcr` (base64 PDF → Claude Haiku → `<page n="X">…</page>`). Redactions flagged via `detectRedactions`.
 
-5. **OCR** (`ocr.ts` → `ocrPdf`): attempt `unpdf` text-layer extraction first (`tryTextLayer`). If average chars/page < 50, fall back to `claudePdfOcr` — sends the PDF as a base64 document block to Claude Haiku and parses `<page n="X">…</page>` tagged output.
+5. **Entity extraction** (`extract.ts` → `extract`): first 50,000 chars → Claude Haiku → `title`, `docType`, dates, `summary`, up to 30 entities.
 
-6. **Redaction detection** (`ocr.ts` → `detectRedactions`): pattern match on `/\[REDACTED\]|████|■■■/` per page. Sets `pages.has_redactions`.
+6. **D1 writes**: one `documents` row, batch `pages`, batch `entities`. FTS5 sync triggers keep `pages_fts` current.
 
-7. **Entity extraction** (`extract.ts` → `extract`): concatenated page text (first 50,000 chars) sent to Claude Haiku with a JSON schema prompt. Returns `title`, `docType`, `documentDate`, `incidentDate`, `summary`, and up to 30 entities.
+7. **Run update**: update the connector's `crawl_runs` row with `finishedAt`, counts, and errors. A failing connector logs to its own run and never aborts the others.
 
-8. **D1 writes** (`crawl.ts` → `ingestDocument`): insert one `documents` row, batch-insert `pages` rows, batch-insert `entities` rows. The FTS5 sync triggers in `0000_init.sql` keep `pages_fts` in lockstep automatically.
+## Release activity dashboard
 
-9. **Crawl run update** (`crawl.ts` → `runCrawl`): update the `crawl_runs` row with `finishedAt`, counts, and any errors.
+`/activity` ([`apps/web/src/pages/activity.astro`](apps/web/src/pages/activity.astro)) aggregates via [`lib/activity.ts`](apps/web/src/lib/activity.ts) (`getActivitySummary`): counts by `source_id` + `country`, a per-day × per-source timeline (`strftime(... ,'unixepoch')`), and released-vs-withheld totals. It renders dependency-free inline SVG: a stacked timeline, a world bubble-map ([`WorldMap.astro`](apps/web/src/components/WorldMap.astro) + [`lib/geo.ts`](apps/web/src/lib/geo.ts), equirectangular projection over country centroids), per-source cards, counters, and a merged feed. Source colors are shared between chart and map via `SOURCE_COLORS`.
 
 ## Hash-anchoring
 
@@ -156,4 +178,7 @@ The cron trigger runs at `0 */6 * * *` (every 6 hours) and is declared in `apps/
 | License | AGPL-3.0-only | Ingestion pipeline correctness is a trust property. AGPL ensures any service operator running a fork must publish their modifications. |
 | OCR | Hybrid unpdf + Claude Haiku | unpdf covers the majority of docs at zero cost. Claude Haiku PDF vision handles scans at ~$0.001/page. Workers AI Llama 3.2 Vision deferred: no PDF rasterization in the Workers runtime. |
 | Auth | None in v0.1 | The archive is public domain source material. Adding auth before there is anything worth protecting creates friction with no benefit. Clerk deferred to v0.2 for saved searches and alerts. |
-| Embeddings | Voyage-3 (planned, v0.2) | 768d, cosine metric. Anthropic's recommended embedding family for document corpora. Vectorize index and binding are pre-provisioned; wiring deferred until FTS5 search is validated at scale. |
+| Embeddings | Voyage-3 (planned) | 768d, cosine metric. Anthropic's recommended embedding family for document corpora. Vectorize index and binding are pre-provisioned; wiring deferred until FTS5 search is validated at scale. |
+| Sources | Connector registry + hybrid fetch/browser runtime (ADR-0001) | One registry drives both static-portal `fetch()` crawling and Cloudflare Browser Rendering for JS/auth sites. Adding a release = one entry. Keeps the proven fetch path untouched. |
+| Media + withheld model | Generalize `documents`, additive migration (ADR-0002) | `media_type` + `status` make non-PDF media and known-but-unreleased items first-class. Migration is additive `ADD COLUMN` only — a table rebuild would risk D1 FK cascade-on-drop wiping `pages`/`entities`. |
+| World map | Centroid bubble-map, inline SVG | A polygon choropleth needs TopoJSON + a map lib. A bubble-map over country centroids is dependency-free, scales to N countries, and reads clearly on the dark theme. |

@@ -36,6 +36,23 @@ describe("schema: documents", () => {
     expectTypeOf<Row["title"]>().toEqualTypeOf<string | null>();
     expectTypeOf<Row["documentDate"]>().toEqualTypeOf<Date | null>();
   });
+
+  it("has the v0.2 multi-source columns", () => {
+    expect(documents.sourceId).toBeDefined();
+    expect(documents.country).toBeDefined();
+    expect(documents.mediaType).toBeDefined();
+    expect(documents.status).toBeDefined();
+  });
+
+  it("infers mediaType and status as literal unions, country nullable", () => {
+    type Row = typeof documents.$inferSelect;
+    expectTypeOf<Row["sourceId"]>().toEqualTypeOf<string>();
+    expectTypeOf<Row["country"]>().toEqualTypeOf<string | null>();
+    expectTypeOf<Row["mediaType"]>().toEqualTypeOf<
+      "pdf" | "image" | "audio" | "video" | "webpage"
+    >();
+    expectTypeOf<Row["status"]>().toEqualTypeOf<"released" | "referenced_withheld">();
+  });
 });
 
 describe("schema: pages", () => {
@@ -74,10 +91,11 @@ describe("schema: entities", () => {
 });
 
 describe("schema: crawlRuns", () => {
-  it("has expected columns", () => {
+  it("has expected columns including the v0.2 source_id", () => {
     expect(crawlRuns.id).toBeDefined();
     expect(crawlRuns.startedAt).toBeDefined();
     expect(crawlRuns.finishedAt).toBeDefined();
+    expect(crawlRuns.sourceId).toBeDefined();
     expect(crawlRuns.sourceDomain).toBeDefined();
     expect(crawlRuns.newDocuments).toBeDefined();
     expect(crawlRuns.updatedDocuments).toBeDefined();

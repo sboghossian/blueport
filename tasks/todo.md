@@ -20,6 +20,76 @@ The canonical, source-grounded archive of UAP/UFO documents released by governme
 
 ---
 
+## v0.2 — Multi-source expansion + activity dashboard (SHIPPED code 2026-05-22 — branch `feat/multi-source-expansion`)
+
+> Status: built + verified (79 tests pass, typecheck clean, web build + crawler dry-run bundle OK). Pending: live D1 migration apply, deploy, and DOM-verification of SIAN/Corbell start URLs against the live sites.
+
+**Trigger**: New drops landed — war.gov *second release* (PURSUE), Brazil's national archive (SIAN), and Jeremy Corbell's *Sleeping Dog* leak set. Generalize the single war.gov crawler into a multi-source connector registry and ship a release-activity dashboard so we can see what's releasing, when, and from where.
+
+This pulls forward the Phase 1.1 "multi-source connector stub" and Phase 3 "map + cross-source linking + international expansion" work.
+
+### Decisions locked (grill-me, 2026-05-22)
+
+| # | Decision | Choice |
+|---|---|---|
+| 1 | Sources (4) | war.gov 2nd release · NARA (archives.gov UAP) · Brazil SIAN · Corbell / *Sleeping Dog* |
+| 2 | Ingestion fidelity | **Full auto-scrape** for all four (chosen over curated-manifest) |
+| 3 | Scrape runtime | **Hybrid** — fetch-only Worker for war.gov + NARA; **Cloudflare Browser Rendering** (`@cloudflare/puppeteer`) for SIAN + Corbell, in the same crawler Worker |
+| 4 | Media model | **Generalize `documents`** — add `media_type` + `status`; nullable OCR/page fields |
+| 5 | Dashboard | Timeline + **world map** + per-source/country cards + released-vs-withheld counter + merged "what's new" feed |
+| 6 | Sequencing | **Everything in one session** |
+
+### Connector registry
+
+Each source = a typed connector `{ id, label, country, kind, startUrl, allowedHosts }`.
+
+| id | label | country | kind | start URL | notes |
+|---|---|---|---|---|---|
+| `us-war-gov` | DoW war.gov/UFO (PURSUE) | US | `fetch` | war.gov/UFO/ | existing path; pick up rolling 2nd-release additions |
+| `us-nara` | US National Archives UAP | US | `fetch` | archives.gov/research/topics/uaps | verify structure at build — may be catalog, not direct PDFs |
+| `br-sian` | Brazil Arquivo Nacional (SIAN) | BR | `browser` | SIAN search UI | JS + possibly login; **no auto-register** |
+| `corbell-sleeping-dog` | Corbell / Sleeping Dog leaks | US | `browser` | curated start URLs (film site, Medium, his properties) | scattered; mostly `referenced_withheld` + few hard docs |
+
+### Schema migration (`packages/db`)
+- [x] `documents`: add `source_id`, `country`, `media_type`, `status` (additive `ADD COLUMN`)
+- [x] ~~Make `r2_key`/`http_status` nullable~~ → kept NOT NULL with documented sentinels (ADR-0002: D1 can't safely DROP/rebuild with cascading FKs); `page_count` already nullable
+- [x] `crawl_runs`: add `source_id TEXT` so runs are per-connector
+- [x] New migration `0001_multisource.sql` + `schema.test.ts` updated + `migrate.sh` applies all migrations
+- [x] Backfill existing rows via migration: `source_id='us-war-gov'`, `country='US'`, defaults for media/status
+
+### Crawler (`apps/crawler`)
+- [x] `connectors.ts` (in `@blueport/db`): registry + `Connector` type; `runCrawl` iterates registry (no more hardcoded `sourceDomain`)
+- [x] `discover()` per kind (fetch keeps `extractPdfUrls` allowlist+`.pdf`; browser harvests assets)
+- [x] `browser.ts`: Cloudflare Browser Rendering (`BROWSER`) renders start URLs; `assets.ts` extracts links
+- [x] generalized `ingestAsset`: pdf/image → R2 + (pdf) OCR; audio/video → link-only; OCR only on pdf
+- [x] `referenced_withheld` ingest path with synthetic sha (seed list empty — no fabricated filenames)
+- [x] `wrangler.toml`: `[browser]` binding; single `scheduled` handler iterates connectors
+- [x] Identifiable UA, one request at a time on fetch path · ~~explicit 1 req/s + robots.txt~~ (deferred)
+
+### Dashboard (`apps/web`)
+- [x] `/activity` route: stacked timeline, per-source cards (released/withheld/this-week/last-fetched), released-vs-withheld + country counters, merged feed
+- [x] World map: inline SVG **bubble-map** over country centroids (US + BR lit; expandable). No map lib — lighter than TopoJSON choropleth (ADR rationale in ARCHITECTURE)
+- [x] `lib/activity.ts`: aggregate queries (by source, by country, by source×day)
+
+### Tests + docs
+- [x] Unit: registry resolves all 4 + host guard + media-type; asset extraction; `syntheticSha`; geo/color helpers; new schema columns (79 tests pass)
+- [x] Edge cases: empty html/source, off-host SSRF, malformed/non-asset URLs, non-http protocols
+- [x] Update README + ARCHITECTURE + CHANGELOG + `lessons.md` + ADR-0001/0002
+- [x] Work on `feat/multi-source-expansion` branch (commit pending)
+
+### Open risks / flags (resolve during build)
+1. **Browser Rendering needs Workers Paid plan** + `browser` binding enabled — confirm account is on it before the SIAN/Corbell path can deploy.
+2. **SIAN login** — if browsing genuinely requires auth, I will **not** auto-register an account; I'll use public access or credentials you provide. Surfacing before I hardcode anything.
+3. **Corbell sources are unstructured** — expect best-effort extraction; likely mostly `referenced_withheld` rows + a handful of hard docs, not a clean corpus.
+4. **NARA structure unverified** — may be a catalog UI rather than direct PDFs; if so it flips from `fetch` to `browser` kind.
+5. **ToS / politeness** — robots.txt + identifiable UA + rate-limit on every connector; no aggressive crawling of SIAN.
+
+### ADRs to write
+- ADR-001: Multi-source connector registry + hybrid fetch/browser runtime
+- ADR-002: Generalized media model (`media_type` + `status` incl. `referenced_withheld`)
+
+---
+
 ## Phase 0 — Confirmed decisions
 
 | # | Decision | Confirmed |

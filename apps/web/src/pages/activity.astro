@@ -1,0 +1,189 @@
+---
+import { desc } from "drizzle-orm";
+import { documents } from "@blueport/db/schema";
+import { CONNECTORS, getConnector } from "@blueport/db/connectors";
+import { getDb } from "../lib/db";
+import { getActivitySummary, sourceColor } from "../lib/activity";
+import DocCard from "../components/DocCard.astro";
+import WorldMap from "../components/WorldMap.astro";
+
+const env = Astro.locals.runtime.env;
+const db = getDb(env);
+
+const summary = await getActivitySummary(db);
+const recent = await db
+  .select()
+  .from(documents)
+  .orderBy(desc(documents.fetchedAt))
+  .limit(24);
+
+// --- Stacked timeline geometry (inline SVG, no chart lib) ---
+const registryOrder = CONNECTORS.map((c) => c.id);
+const sourceIds = Array.from(new Set(summary.timeline.map((t) => t.sourceId))).sort((a, b) => {
+  const ia = registryOrder.indexOf(a);
+  const ib = registryOrder.indexOf(b);
+  return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib);
+});
+const allDays = Array.from(new Set(summary.timeline.map((t) => t.day))).sort();
+const days = allDays.slice(-45);
+
+const cell = new Map<string, number>();
+for (const t of summary.timeline) cell.set(`${t.day}|${t.sourceId}`, t.count);
+
+const CW = 720;
+const CH = 180;
+const PAD_B = 18;
+const GAP = 2;
+const barW = days.length > 0 ? Math.max(1, (CW - (days.length - 1) * GAP) / days.length) : 0;
+const maxTotal = Math.max(
+  1,
+  ...days.map((d) => sourceIds.reduce((n, s) => n + (cell.get(`${d}|${s}`) ?? 0), 0)),
+);
+
+interface Seg {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  color: string;
+}
+const segments: Seg[] = [];
+days.forEach((d, i) => {
+  const x = i * (barW + GAP);
+  let yCursor = CH - PAD_B;
+  for (const s of sourceIds) {
+    const c = cell.get(`${d}|${s}`) ?? 0;
+    if (c <= 0) continue;
+    const h = (c / maxTotal) * (CH - PAD_B);
+    yCursor -= h;
+    segments.push({ x, y: yCursor, w: barW, h, color: sourceColor(s) });
+  }
+});
+
+const legend = sourceIds.map((s) => ({
+  id: s,
+  label: getConnector(s)?.label ?? s,
+  color: sourceColor(s),
+}));
+
+const totalDocs = summary.totalReleased + summary.totalWithheld;
+const isEmpty = totalDocs === 0;
+const firstDay = days[0];
+const lastDay = days[days.length - 1];
+
+function relative(d: Date): string {
+  const s = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
+}
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <title>Release activity · Blueport</title>
+    <meta name="description" content="Live view of UAP/UFO document releases across governments and sources." />
+    <link rel="alternate" type="application/rss+xml" title="Blueport" href="/rss.xml" />
+  </head>
+  <body class="bg-zinc-950 text-zinc-100 font-mono">
+    <main class="max-w-4xl mx-auto px-6 py-12">
+      <header class="mb-8 flex items-baseline justify-between">
+        <div>
+          <a href="/" class="text-xs text-zinc-500 hover:text-zinc-200">← Blueport</a>
+          <h1 class="mt-2 text-2xl font-bold tracking-tight">Release activity</h1>
+          <p class="mt-1 text-sm text-zinc-500">
+            What's releasing, when, and from where — across {CONNECTORS.length} sources.
+          </p>
+        </div>
+        <a href="/new" class="text-xs text-zinc-500 hover:text-zinc-200">newest →</a>
+      </header>
+
+      {isEmpty && (
+        <div class="rounded border border-zinc-800 bg-zinc-900/40 p-6 text-sm text-zinc-400">
+          Nothing ingested yet. Once the crawler runs against the sources, the timeline and map fill in here.
+        </div>
+      )}
+
+      {!isEmpty && (
+        <>
+          <section class="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4">
+              <div class="text-2xl font-bold text-emerald-400">{summary.totalReleased.toLocaleString()}</div>
+              <div class="mt-1 text-xs uppercase tracking-wide text-zinc-500">released</div>
+            </div>
+            <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4">
+              <div class="text-2xl font-bold text-amber-400">{summary.totalWithheld.toLocaleString()}</div>
+              <div class="mt-1 text-xs uppercase tracking-wide text-zinc-500">referenced · withheld</div>
+            </div>
+            <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4">
+              <div class="text-2xl font-bold text-zinc-100">{summary.byCountry.length}</div>
+              <div class="mt-1 text-xs uppercase tracking-wide text-zinc-500">countries</div>
+            </div>
+          </section>
+
+          <section class="mt-6">
+            <WorldMap byCountry={summary.byCountry} />
+          </section>
+
+          <section class="mt-6 rounded border border-zinc-800 bg-zinc-900/40 p-4">
+            <div class="flex items-baseline justify-between">
+              <h2 class="text-xs uppercase tracking-wide text-zinc-500">Releases over time</h2>
+              {firstDay && lastDay && (
+                <span class="text-xs text-zinc-600">{firstDay} → {lastDay}</span>
+              )}
+            </div>
+            <svg viewBox={`0 0 ${CW} ${CH}`} class="mt-3 w-full h-auto" role="img" aria-label="Stacked bar chart of releases per day by source">
+              <line x1="0" y1={CH - PAD_B} x2={CW} y2={CH - PAD_B} stroke="#3f3f46" stroke-width="0.5" />
+              {segments.map((s) => (
+                <rect x={s.x} y={s.y} width={s.w} height={s.h} fill={s.color} fill-opacity="0.85" />
+              ))}
+            </svg>
+            <ul class="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+              {legend.map((l) => (
+                <li class="flex items-center gap-1.5 text-zinc-400">
+                  <span class="inline-block h-2.5 w-2.5 rounded-sm" style={`background:${l.color}`}></span>
+                  <span class="truncate">{l.label}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          <section class="mt-6">
+            <h2 class="mb-3 text-xs uppercase tracking-wide text-zinc-500">Sources</h2>
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {summary.bySource.map((s) => (
+                <div class="rounded border border-zinc-800 bg-zinc-900/40 p-4">
+                  <div class="flex items-center gap-2">
+                    <span class="inline-block h-2.5 w-2.5 rounded-sm" style={`background:${sourceColor(s.sourceId)}`}></span>
+                    <span class="text-sm font-semibold text-zinc-100 truncate">{getConnector(s.sourceId)?.label ?? s.sourceId}</span>
+                    {s.country && <span class="ml-auto rounded border border-zinc-700 px-1.5 py-0.5 text-xs text-zinc-400">{s.country}</span>}
+                  </div>
+                  <div class="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-400">
+                    <span><span class="text-zinc-200">{s.released.toLocaleString()}</span> released</span>
+                    {s.withheld > 0 && <span><span class="text-amber-300">{s.withheld.toLocaleString()}</span> withheld</span>}
+                    <span><span class="text-zinc-200">{s.newThisWeek}</span> this week</span>
+                    <span class="text-zinc-500">{s.lastFetched ? relative(s.lastFetched) : "never"}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section class="mt-6">
+            <h2 class="mb-3 text-xs uppercase tracking-wide text-zinc-500">What's new</h2>
+            <div class="space-y-3">
+              {recent.map((doc) => <DocCard doc={doc} />)}
+            </div>
+          </section>
+        </>
+      )}
+
+      <footer class="mt-12 border-t border-zinc-900 pt-6 text-xs text-zinc-600">
+        <a href="https://github.com/sboghossian/blueport" class="hover:text-zinc-300">GitHub</a>
+      </footer>
+    </main>
+  </body>
+</html>

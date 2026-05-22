@@ -6,7 +6,9 @@ The source-grounded archive of UAP/UFO documents released by governments.
 
 ## What this is
 
-Blueport crawls government-released UAP/UFO documents — starting with the Pentagon's 2026 release at [war.gov/UFO/](https://www.war.gov/UFO/) — OCRs them, hash-anchors the originals to R2, runs entity extraction, and exposes the corpus through full-text search, page-anchored deep links, per-document provenance, and an RSS feed that fires on every new or updated document.
+Blueport crawls government-released UAP/UFO documents across **multiple sources** — the Pentagon's rolling release at [war.gov/UFO/](https://www.war.gov/UFO/), the US National Archives, Brazil's national archive (SIAN), and the Jeremy Corbell / *Sleeping Dog* leak set — OCRs them, hash-anchors the originals to R2, runs entity extraction, and exposes the corpus through full-text search, page-anchored deep links, per-document provenance, an RSS feed, and a **release-activity dashboard** showing what is releasing, when, and from where.
+
+Sources are defined in a **connector registry** ([`packages/db/src/connectors.ts`](packages/db/src/connectors.ts)). Static government portals are crawled with plain `fetch()`; JS-rendered / session-gated archives (SIAN, Corbell) are rendered with **Cloudflare Browser Rendering** (headless Chrome). Adding a new government release is a one-line registry entry.
 
 Every claim cites a page. No editorial framing. The ingestion pipeline is AGPL-3.0 by design: trust requires an auditable open-source record of how each document entered the archive, what was extracted from it, and whether it has changed since first fetch.
 
@@ -17,10 +19,11 @@ Pre-alpha. See [tasks/todo.md](tasks/todo.md) for the live plan and acceptance c
 ## Stack
 
 - **Frontend**: Astro 5 + Tailwind on Cloudflare Pages
-- **Backend**: Hono on Cloudflare Workers (cron-driven crawler + API)
+- **Backend**: Hono on Cloudflare Workers (cron-driven multi-source crawler + API)
+- **Scraping**: hybrid — plain `fetch()` for static portals, **Cloudflare Browser Rendering** (`@cloudflare/puppeteer`, headless Chrome) for JS/session-gated sources (Workers Paid plan)
 - **DB**: Cloudflare D1 (SQLite + FTS5)
-- **Vector**: Cloudflare Vectorize (Voyage-3, 768d, cosine — wired in v0.2)
-- **Storage**: Cloudflare R2 (PDF originals, hash-anchored at `docs/<sha256>.pdf`)
+- **Vector**: Cloudflare Vectorize (Voyage-3, 768d, cosine — wired in a later release)
+- **Storage**: Cloudflare R2 (originals, hash-anchored at `docs/<sha256>.<ext>`)
 - **OCR**: hybrid — `unpdf` text-layer first (free/fast), Claude Haiku PDF vision fallback (~$0.001/page) for scanned documents
 - **LLM**: Anthropic Claude — Haiku for entity extraction, Sonnet for summaries (v0.2), Opus for contradiction view (v0.4)
 - **Embeddings**: Voyage-3 planned (v0.2)
@@ -31,14 +34,19 @@ Pre-alpha. See [tasks/todo.md](tasks/todo.md) for the live plan and acceptance c
 ```
 apps/
   web/      Astro frontend on Cloudflare Pages
-  crawler/  Worker with cron + Hono — fetches war.gov, hash-anchors to R2,
-            OCRs (unpdf + Claude PDF), entity-extracts (Claude Haiku),
-            inserts documents/pages/entities into D1
+            /activity dashboard (timeline + world map + source cards + feed),
+            search, doc pages, RSS
+  crawler/  Worker with cron + Hono — iterates the connector registry,
+            hash-anchors to R2, OCRs (unpdf + Claude PDF), entity-extracts
+            (Claude Haiku), inserts documents/pages/entities into D1
+            src/connectors via @blueport/db · assets.ts (link parsing) ·
+            browser.ts (Cloudflare Browser Rendering)
 packages/
-  db/       Drizzle schema + 0000_init.sql migration
+  db/       Drizzle schema + connector registry (connectors.ts) + migrations
 scripts/
   setup.sh    One-time Cloudflare resource provisioning
-  migrate.sh  Apply D1 migrations
+  migrate.sh  Apply all D1 migrations in order
+docs/adr/   Architecture decision records
 .github/workflows/
   ci.yml      Typecheck + build on PR
   release.yml Release on v* tags
@@ -80,14 +88,16 @@ pnpm crawler:deploy
 pnpm --filter @blueport/web deploy
 ```
 
+> **Browser Rendering** (`[browser]` binding in `apps/crawler/wrangler.toml`) powers the SIAN + Corbell connectors and requires the **Workers Paid plan**. On the free plan the crawler still deploys; the `browser`-kind connectors error per-run and are skipped, while the `fetch`-kind connectors (war.gov, NARA) and the dashboard work normally.
+
 ## How it works
 
-- The crawler Worker runs every 6 hours via Cloudflare Cron Triggers, scraping the war.gov/UFO/ index for PDF links.
-- Each PDF is fetched and SHA-256 fingerprinted. Documents seen before are skipped; hash changes trigger an update.
-- The original PDF is stored in R2 at `docs/<sha256>.pdf` with `sourceUrl` and `fetchedAt` metadata. R2 objects are never overwritten — new content lands at a new hash.
-- OCR runs text-layer extraction via `unpdf` first. If average characters per page falls below 50, it falls back to Claude Haiku's PDF vision input (parse `<page n="X">…</page>` tagged output).
-- Claude Haiku extracts structured metadata from the full text: title, doc type, document date, incident date, a factual summary, and up to 30 named entities (person, location, unit, craft, sensor, date) with normalized canonical forms.
-- All rows are written to D1 in a single ingestion call: one `documents` row, batch `pages` rows (with `has_redactions` flag set on pattern match), batch `entities` rows.
+- The crawler Worker runs every 6 hours via Cloudflare Cron Triggers and iterates the **connector registry**. Each connector declares its `kind`: `fetch` (static portal → `.pdf` links) or `browser` (rendered with headless Chrome).
+- Discovered assets are classified by extension into media types (`pdf`, `image`, `audio`, `video`). PDFs and images are downloaded + hash-anchored to R2 at `docs/<sha256>.<ext>`; audio/video are recorded as link-only (`r2_key` empty). A hostname allowlist per connector guards against SSRF.
+- Each downloaded file is SHA-256 fingerprinted. Documents seen before are skipped; new content lands at a new hash. R2 objects are never overwritten.
+- PDFs run OCR — text-layer via `unpdf` first; below 50 avg chars/page it falls back to Claude Haiku's PDF vision input (parse `<page n="X">…</page>` output) — then Claude Haiku extracts title, doc type, dates, a factual summary, and up to 30 named entities.
+- **Released vs. withheld**: every document has a `status`. Items known to exist but not released (e.g. a UAP video named in a congressional request) are recorded as `referenced_withheld` with no stored original — surfaced as a counter on the dashboard. Seed entries require a verifiable public reference; filenames are never fabricated.
+- Per-source crawl runs are tracked in `crawl_runs` (with `source_id`), and the `/activity` dashboard aggregates documents by source, country, and day.
 
 ## Scripts
 
@@ -101,7 +111,7 @@ pnpm --filter @blueport/web deploy
 | `pnpm db:generate` | Regenerate Drizzle migration files from schema |
 | `pnpm db:migrate` | Run Drizzle migrations (local dev) |
 | `scripts/setup.sh` | One-time provisioning of D1, R2, and Vectorize |
-| `scripts/migrate.sh` | Apply `0000_init.sql` to D1 (`--local` or `--remote`) |
+| `scripts/migrate.sh` | Apply all `drizzle/*.sql` migrations in order to D1 (`--local` or `--remote`) |
 
 ## Roadmap
 

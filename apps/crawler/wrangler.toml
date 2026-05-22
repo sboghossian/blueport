@@ -27,8 +27,13 @@ index_name = "blueport-pages"
 [ai]
 binding = "AI"
 
+# Headless Chrome for browser-kind connectors (SIAN, Corbell).
+# Requires the Workers Paid plan.
+[browser]
+binding = "BROWSER"
+
 [vars]
-USER_AGENT = "BlueportBot/0.1 (+https://github.com/sboghossian/blueport)"
-SOURCE_INDEX_URL = "https://www.war.gov/UFO/"
-ALLOWED_SOURCE_HOSTS = "war.gov"
+USER_AGENT = "BlueportBot/0.2 (+https://github.com/sboghossian/blueport)"
+# Sources are defined in packages/db/src/connectors.ts (the connector registry),
+# not here — adding a government release = adding one entry there.
 # CRAWL_ADMIN_TOKEN is set via `wrangler secret put CRAWL_ADMIN_TOKEN`

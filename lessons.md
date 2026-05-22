@@ -44,3 +44,19 @@ Append-only. What was surprising or non-obvious during a yalla run, framed so fu
 ### Dev-server smoke tests via background `pnpm dev` are tricky
 - Tried to background `pnpm dev`, sleep, then curl. Astro never bound — turned out chained `head -1` consumed stdout and killed the process. All curls returned `status=000`.
 - Rebuild + typecheck pass is a strong-enough signal for routes parsing; live dev-server verification needs a proper supervisor (or skip until deploy).
+
+## v0.2 multi-source expansion (2026-05-22)
+
+### D1 migrations can't safely DROP a table with cascading FKs
+- Relaxing a NOT NULL column in SQLite needs a table rebuild (create/copy/**drop**/rename). On D1, migrations run inside a transaction, where `PRAGMA foreign_keys=OFF` is a **no-op** — and `DROP TABLE documents` does an implicit DELETE that fires `ON DELETE CASCADE` on `pages`/`entities`, silently wiping them. `PRAGMA defer_foreign_keys` defers *checks*, not cascade *actions*, so it doesn't help.
+- Pragmatic fix: keep `r2_key`/`http_status` NOT NULL, use documented sentinels (`""`/`0`), and make the migration purely additive `ADD COLUMN`. If true nullability is ever required, run the rebuild with `foreign_keys=OFF` in a standalone `wrangler d1 execute` *outside* the migration runner. (ADR-0002)
+
+### Verify SDK/package versions before pinning — again
+- Pinned `@cloudflare/puppeteer` at `^0.0.14` from memory; npm `latest` is actually `1.1.0` (`0.0.14-rc` only lives under the `next` tag). `npm view <pkg> dist-tags` in five seconds beats a failed install. (Same class of trap as the `@anthropic-ai/sdk` version miss in v0.1.)
+
+### Dynamically import Workers-only deps to keep code unit-testable
+- `@cloudflare/puppeteer` is Workers-only and shouldn't load in node/vitest. A static `import` in `crawl.ts` would pull it into every test that imports the crawler. Switched to `await import("./browser.js")` inside the `browser`-kind branch — keeps puppeteer out of the static graph for the fetch path and tests, with zero runtime cost on the path that does use it.
+
+### Parse rendered HTML as a string, not via DOM types in `$$eval`
+- Puppeteer's `page.$$eval` callback runs in the browser and needs DOM lib types; adding `"DOM"` to a Workers tsconfig fights `@cloudflare/workers-types` over globals. Used `page.content()` to get post-render HTML, then reused the same regex/string asset parser as the fetch path. No DOM types, one extraction code path, easy to unit-test (`assets.ts` is pure).
+

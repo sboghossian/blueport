@@ -7,7 +7,7 @@ import {
   isHostAllowed,
   type Connector,
 } from "@blueport/db/connectors";
-import { ocrPdf } from "./ocr.js";
+import { ocrPdf, detectRedactions } from "./ocr.js";
 import { extract } from "./extract.js";
 import { hasLlm } from "./llm.js";
 import type { Env } from "./index.js";
@@ -75,14 +75,21 @@ async function crawlConnector(
   let updatedDocuments = 0;
 
   try {
-    const assets = await discover(env, connector);
-    for (const asset of assets) {
-      try {
-        const result = await ingestAsset(env, db, connector, asset);
-        if (result === "new") newDocuments++;
-        else if (result === "updated") updatedDocuments++;
-      } catch (err) {
-        errors.push(`${asset.url}: ${errMessage(err)}`);
+    if (connector.kind === "github-corpus") {
+      const r = await ingestGithubCorpus(env, db, connector);
+      newDocuments = r.newDocuments;
+      updatedDocuments = r.updatedDocuments;
+      errors.push(...r.errors);
+    } else {
+      const assets = await discover(env, connector);
+      for (const asset of assets) {
+        try {
+          const result = await ingestAsset(env, db, connector, asset);
+          if (result === "new") newDocuments++;
+          else if (result === "updated") updatedDocuments++;
+        } catch (err) {
+          errors.push(`${asset.url}: ${errMessage(err)}`);
+        }
       }
     }
   } catch (err) {
@@ -189,6 +196,135 @@ function waybackTitle(original: string): string | null {
   } catch {
     return null;
   }
+}
+
+interface CorpusRecord {
+  id: string;
+  slug?: string;
+  title?: string;
+  agency?: string;
+  release_date?: string;
+  incident_date?: string;
+  incident_location?: string;
+  redaction?: string;
+  document_type?: string;
+  description?: string;
+}
+interface FulltextHit {
+  record_id: string;
+  page: number;
+  text: string;
+}
+
+/**
+ * Ingest a `github-corpus` connector: a JSON mirror that already supplies OCR
+ * text + metadata (e.g. Pump-OS/alien-files, the war.gov PURSUE release). No
+ * per-doc fetch or OCR — we read [indexUrl, fulltextUrl] once and build rows.
+ */
+async function ingestGithubCorpus(
+  env: Env,
+  db: ReturnType<typeof drizzle>,
+  connector: Connector,
+): Promise<{ newDocuments: number; updatedDocuments: number; errors: string[] }> {
+  const errors: string[] = [];
+  let newDocuments = 0;
+  let updatedDocuments = 0;
+
+  const indexUrl = connector.startUrls[0];
+  const fulltextUrl = connector.startUrls[1];
+  if (!indexUrl || !fulltextUrl) {
+    errors.push("github-corpus: startUrls must be [indexUrl, fulltextUrl]");
+    return { newDocuments, updatedDocuments, errors };
+  }
+
+  const index = (await fetchJson(env, indexUrl)) as CorpusRecord[];
+  const fulltext = (await fetchJson(env, fulltextUrl)) as { hits?: FulltextHit[] };
+
+  const pagesByRecord = new Map<string, FulltextHit[]>();
+  for (const hit of fulltext.hits ?? []) {
+    const arr = pagesByRecord.get(hit.record_id) ?? [];
+    arr.push(hit);
+    pagesByRecord.set(hit.record_id, arr);
+  }
+
+  const limit = connector.maxDocs ?? index.length;
+  for (const rec of index.slice(0, limit)) {
+    try {
+      const result = await ingestCorpusRecord(db, connector, rec, pagesByRecord.get(rec.id) ?? []);
+      if (result === "new") newDocuments++;
+      else if (result === "updated") updatedDocuments++;
+    } catch (err) {
+      errors.push(`${rec.id}: ${errMessage(err)}`);
+    }
+  }
+  return { newDocuments, updatedDocuments, errors };
+}
+
+async function ingestCorpusRecord(
+  db: ReturnType<typeof drizzle>,
+  connector: Connector,
+  rec: CorpusRecord,
+  hits: FulltextHit[],
+): Promise<"new" | "updated" | "unchanged"> {
+  const sha = await syntheticSha([connector.id, rec.id]);
+  if (await exists(db, sha)) return "unchanged";
+
+  const agency = rec.agency?.trim();
+  const baseTitle = rec.title?.trim() || rec.slug || rec.id;
+  const title = agency ? `[${agency}] ${baseTitle}` : baseTitle;
+  const redactionFlag = (rec.redaction ?? "").trim().length > 0;
+
+  // One row per page, sorted, deduped on page number (the unique index requires it).
+  const seenPages = new Set<number>();
+  const pageRows = hits
+    .slice()
+    .sort((a, b) => a.page - b.page)
+    .filter((h) => (seenPages.has(h.page) ? false : (seenPages.add(h.page), true)))
+    .map((h) => ({
+      docSha: sha,
+      pageNumber: h.page,
+      text: h.text,
+      ocrModel: "pursue-mirror",
+      ocrConfidence: null,
+      hasRedactions: redactionFlag || detectRedactions(h.text),
+    }));
+
+  await db.insert(documents).values({
+    sha256: sha,
+    sourceId: connector.id,
+    sourceUrl: connector.startUrls[0] ?? "",
+    sourceDomain: "github.com/Pump-OS/alien-files",
+    country: connector.country,
+    mediaType: "pdf",
+    status: "released",
+    title,
+    docType: "other",
+    pageCount: pageRows.length || null,
+    fetchedAt: new Date(),
+    documentDate: parseLooseDate(rec.release_date),
+    incidentDate: parseLooseDate(rec.incident_date),
+    httpStatus: 200,
+    r2Key: "",
+    summary: rec.description?.trim() || null,
+  });
+
+  await chunkedInsert(pageRows, PAGE_CHUNK, (rows) => db.insert(pages).values(rows));
+  return "new";
+}
+
+async function fetchJson(env: Env, url: string): Promise<unknown> {
+  const res = await fetch(url, { headers: { "user-agent": env.USER_AGENT } });
+  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+  return res.json();
+}
+
+/** Lenient date parse for mirror metadata ("5/8/26", "1947", "N/A", ""). */
+export function parseLooseDate(s: string | undefined): Date | null {
+  if (!s) return null;
+  const t = s.trim();
+  if (!t || t.toUpperCase() === "N/A") return null;
+  const d = new Date(t);
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 async function ingestAsset(

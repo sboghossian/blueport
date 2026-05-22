@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractPdfUrls, syntheticSha, sha256 } from "../src/crawl.js";
+import { extractPdfUrls, syntheticSha, sha256, parseLooseDate } from "../src/crawl.js";
 
 const allowed = ["war.gov"] as const;
 
@@ -110,5 +110,23 @@ describe("syntheticSha", () => {
   it("produces a 64-char hex digest, like a real sha256", async () => {
     expect(await syntheticSha(["x"])).toMatch(/^[a-f0-9]{64}$/);
     expect(await sha256(new ArrayBuffer(8))).toMatch(/^[a-f0-9]{64}$/);
+  });
+});
+
+describe("parseLooseDate", () => {
+  it("returns null for empty, undefined, or N/A", () => {
+    expect(parseLooseDate(undefined)).toBeNull();
+    expect(parseLooseDate("")).toBeNull();
+    expect(parseLooseDate("N/A")).toBeNull();
+    expect(parseLooseDate("  n/a  ")).toBeNull();
+  });
+
+  it("parses M/D/YY and full dates", () => {
+    expect(parseLooseDate("5/8/26")?.getFullYear()).toBe(2026);
+    expect(parseLooseDate("1947-07-08")?.getFullYear()).toBe(1947);
+  });
+
+  it("returns null for unparseable junk", () => {
+    expect(parseLooseDate("sometime in the 50s")).toBeNull();
   });
 });

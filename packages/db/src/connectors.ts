@@ -10,8 +10,12 @@ import type { MediaType } from "./schema.js";
  *   Archive's Wayback Machine. `startUrls` hold CDX url-match patterns (not
  *   real URLs); discovery queries the CDX API for archived PDFs and fetches the
  *   raw bytes via web.archive.org. Robust against 403s and JS-only portals.
+ * - `github-corpus`: a community GitHub mirror that already provides OCR text +
+ *   metadata as JSON. `startUrls` = [indexUrl, fulltextUrl] (raw.githubusercontent
+ *   URLs). No fetch/OCR per doc — text is supplied. Used to ingest the war.gov
+ *   PURSUE release via the Pump-OS/alien-files mirror.
  */
-export type ConnectorKind = "fetch" | "browser" | "wayback";
+export type ConnectorKind = "fetch" | "browser" | "wayback" | "github-corpus";
 
 /** ISO-3166 alpha-2 of the releasing government. */
 export type Country = "US" | "BR";
@@ -110,6 +114,19 @@ export const CONNECTORS: readonly Connector[] = [
     startUrls: ["aaro.mil/Portals/136/Images/UAP*", "aaro.mil/Portals/136/PDFs*"],
     allowedHosts: ["web.archive.org", "aaro.mil"],
     maxDocs: 15,
+  },
+  {
+    id: "pursue-archive",
+    label: "PURSUE Release — war.gov mirror (DoW · FBI · NASA · State)",
+    country: "US",
+    kind: "github-corpus",
+    // [indexUrl, fulltextUrl] — OCR'd JSON mirror of the May 2026 PURSUE release.
+    startUrls: [
+      "https://raw.githubusercontent.com/Pump-OS/alien-files/main/data/json/index.json",
+      "https://raw.githubusercontent.com/Pump-OS/alien-files/main/data/json/fulltext.json",
+    ],
+    allowedHosts: ["raw.githubusercontent.com"],
+    maxDocs: 161,
   },
 ] as const;
 

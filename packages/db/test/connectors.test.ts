@@ -23,7 +23,7 @@ describe("connector registry", () => {
     for (const c of CONNECTORS) {
       expect(c.startUrls.length).toBeGreaterThan(0);
       expect(c.allowedHosts.length).toBeGreaterThan(0);
-      expect(["fetch", "browser", "wayback"]).toContain(c.kind);
+      expect(["fetch", "browser", "wayback", "github-corpus"]).toContain(c.kind);
     }
   });
 
